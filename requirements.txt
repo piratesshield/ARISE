@@ -1,0 +1,155 @@
+# ARISE - "Summon Every Hidden Exposure." - Mac mini Setup Requirements
+# This file lists all dependencies for setting up a fresh Mac mini for ARISE security research
+# Run: pip3 install -r requirements.txt
+# Install Xcode Command Line Tools: xcode-select --install
+
+# ==============================================================================
+# SYSTEM PRE-REQUISITES (Run these FIRST in terminal)
+# ==============================================================================
+# 1. Install Xcode Command Line Tools
+#    xcode-select --install
+#
+# 2. Install Homebrew (if not already installed)
+#    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+#
+# 3. Install core utilities
+#    brew install wget curl git jq python3 golang
+#
+# 4. Install Nmap
+#    brew install nmap
+#
+# 5. Install wafw00f
+#    pip3 install wafw00f
+#
+# 6. Install tldextract
+#    pip3 install tldextract
+#
+# 7. Install libpcap (required to build naabu)
+#    brew install libpcap
+#
+# 8. Install massdns (required by puredns)
+#    brew install massdns
+
+# ==============================================================================
+# PYTHON DEPENDENCIES (pip3 install -r requirements.txt)
+# ==============================================================================
+
+# HTTP and API clients
+requests>=2.31.0
+urllib3>=2.0.0
+
+# JSON and data processing
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# Security libraries
+pyOpenSSL>=23.2.0
+cryptography>=41.0.0
+
+# Network tools
+scapy>=2.5.0
+
+# DOM parsing and web scraping
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
+html5lib>=1.1
+
+# Data visualization (for reports)
+matplotlib>=3.7.2
+pandas>=2.1.1
+tabulate>=0.9.0
+
+# CLI utilities
+colorama>=0.4.6
+tqdm>=4.66.1
+rich>=13.6.0
+
+# Configuration and utilities
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+
+# Dashboard dependencies
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Additional utilities
+python-magic>=0.4.27
+filetype>=1.2.0
+validators>=0.22.0
+
+# Web directory discovery
+dirsearch>=0.4.3
+
+# ==============================================================================
+# GO TOOLS (Install via: go install tool@latest)
+# ==============================================================================
+# These tools are required for the ARISE pipeline. Install them in order:
+# NOTE: naabu requires libpcap first -> brew install libpcap
+
+# Subdomain enumeration
+# go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+# go install -v github.com/d3mondev/puredns/v2@latest
+# go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+# go install -v github.com/hakluke/haktrails@latest
+# go install -v github.com/tomnomnom/anew@latest
+
+# HTTP and port scanning
+# go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+# go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+# go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+
+# Directory and content discovery
+# go install -v github.com/lc/gau/v2/cmd/gau@latest
+# go install -v github.com/jaeles-project/gospider@latest
+# go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+
+# Fuzzing tools
+# go install -v github.com/ffuf/ffuf@latest
+# go install -v github.com/tomnomnom/gf@latest
+# go install -v github.com/tomnomnom/qsreplace@latest
+# go install -v github.com/dwisiswant0/bhedak@latest
+
+# Secret scanning
+# go install -v github.com/trufflesecurity/trufflehog/v3/cmd/trufflehog@latest
+
+# XSS tools
+# go install -v github.com/hahwul/dalfox/v2@latest
+
+# ==============================================================================
+# GF PATTERNS (required for gf xss / param fuzzing modules)
+# ==============================================================================
+# mkdir -p ~/.gf
+# git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf-patterns-tmp && cp ~/.gf-patterns-tmp/*.json ~/.gf/ && rm -rf ~/.gf-patterns-tmp
+
+# ==============================================================================
+# NUCLEI TEMPLATES
+# ==============================================================================
+# Clone nuclei-templates (required for vulnerability scanning)
+# mkdir -p ~/recon/nuclei-templates
+# git clone https://github.com/projectdiscovery/nuclei-templates.git ~/recon/nuclei-templates
+
+# ==============================================================================
+# WORDLISTS (Download to ~/recon/lists/)
+# ==============================================================================
+# mkdir -p ~/recon/lists
+# cd ~/recon/lists
+
+# DNS wordlists
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt
+# wget https://raw.githubusercontent.com/trickest/resolvers/main/resolvers.txt
+
+# Web content wordlists
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/big.txt
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/directory-list-2.3-medium.txt
+
+# Fuzzing payloads
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Fuzzing/LFI/LFI-Jhaddix.txt
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Fuzzing/SQLi/SQL-Injection-Payloads.txt
+# wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Fuzzing/XSS/XSS-Jhaddix.txt
+
+# ==============================================================================
+# PATH SETUP (Add to ~/.zshrc or ~/.bashrc)
+# ==============================================================================
+# export PATH=$PATH:~/go/bin:~/recon/lists
