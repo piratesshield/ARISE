@@ -310,7 +310,7 @@ check_dependencies() {
     # Warn about missing recon tools
     if [ ${#missing_recon[@]} -gt 0 ]; then
         log_warn "Missing recon tools: ${missing_recon[*]}"
-        log_warn "Install them with: cd /Users/apple/Documents/zero-EASM && bash setup-macmini.sh"
+        log_warn "Install them with: bash setup.sh"
         log_warn "Continuing with available tools..."
     else
         log_info "All dependencies available"

@@ -41,8 +41,8 @@ zero-EASM/
 ├── logs/                                    # General orchestrator logs
 ├── arise.py                                 # Main controller & dashboard orchestrator
 ├── easm-pipeline.sh                         # Core shell scanning pipeline
-├── setup.sh                                 # macOS/Mac mini dependency installer
-└── requirements.txt                         # Python dependencies manifest
+├── setup.sh                                 # Linux (Debian/Ubuntu) dependency installer
+├── requirements.txt                         # Python dependencies manifest
 ```
 
 ---
@@ -50,10 +50,10 @@ zero-EASM/
 ## ⚙️ One-Time Setup
 
 > [!NOTE]
-> The setup script is designed specifically for macOS (tested on Mac mini systems).
+> The setup script is designed for Debian/Ubuntu-based Linux environments.
 
 ### 1. Run the Setup Script
-The script installs Xcode Command Line Tools, Homebrew, Go, Python, core utilities, and standard security packages (such as `nmap`, `massdns`, etc.), and downloads necessary discovery wordlists:
+The script updates APT packages, installs core utility/build packages, compiles MassDNS from source, downloads wordlists, and installs Go tools:
 ```bash
 bash setup.sh
 ```

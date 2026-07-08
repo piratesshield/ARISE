@@ -1,20 +1,14 @@
 #!/bin/bash
-# Mac mini Setup Script for ARISE
+# Linux Setup Script for ARISE
 # "Summon Every Hidden Exposure."
-# This script installs all required dependencies on a fresh Mac mini
+# This script installs all required dependencies on a Debian/Ubuntu Linux system
 
 set -e
 
 echo "========================================"
-echo "  ARISE Setup for Mac mini"
+echo "  ARISE Setup for Linux (Debian/Ubuntu)"
 echo "  Summon Every Hidden Exposure."
 echo "========================================"
-
-# Check if running on macOS
-if [[ "$OSTYPE" != "darwin"* ]]; then
-    echo "ERROR: This script is designed for macOS only"
-    exit 1
-fi
 
 # Colors
 RED='\033[0;31m'
@@ -39,33 +33,26 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Install Homebrew if not installed
-install_homebrew() {
-    log_info "Checking Homebrew..."
-    if ! command_exists brew; then
-        log_info "Installing Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-        log_info "Homebrew installed successfully"
+# Update package lists
+update_package_lists() {
+    log_info "Updating APT package lists..."
+    if command_exists apt-get; then
+        sudo apt-get update -y
     else
-        log_info "Homebrew already installed"
+        log_error "This script requires an APT-based Linux distribution (Debian/Ubuntu)."
+        exit 1
     fi
 }
 
-# Install core utilities
+# Install core utilities and build tools
 install_core_utils() {
-    log_info "Installing core utilities..."
+    log_info "Installing core build tools and utilities..."
     
-    local tools="wget curl git jq python3 golang"
+    local packages="build-essential wget curl git jq python3 python3-pip python3-venv golang"
     
-    for tool in $tools; do
-        if ! command_exists "$tool"; then
-            log_info "Installing $tool..."
-            brew install "$tool"
-        else
-            log_info "$tool already installed"
-        fi
+    for pkg in $packages; do
+        log_info "Installing $pkg..."
+        sudo apt-get install -y "$pkg"
     done
 }
 
@@ -76,31 +63,49 @@ install_security_tools() {
     # Nmap
     if ! command_exists nmap; then
         log_info "Installing nmap..."
-        brew install nmap
+        sudo apt-get install -y nmap
     fi
 
     # massdns is required by puredns.
     if ! command_exists massdns; then
-        log_info "Installing massdns..."
-        brew install massdns
+        log_info "Installing massdns from source..."
+        local tmp_dir
+        tmp_dir=$(mktemp -d)
+        git clone --quiet https://github.com/blechschmidt/massdns.git "$tmp_dir"
+        if make -C "$tmp_dir" >/dev/null 2>&1; then
+            sudo cp "$tmp_dir/bin/massdns" /usr/local/bin/
+            log_info "massdns installed successfully"
+        else
+            log_warn "massdns compilation failed. Please ensure build-essential is configured correctly."
+        fi
+        rm -rf "$tmp_dir"
+    else
+        log_info "massdns already installed"
     fi
 
-    # libpcap is required to build naabu.
-    if ! brew list libpcap &>/dev/null; then
-        log_info "Installing libpcap..."
-        brew install libpcap
-    fi
+    # libpcap-dev is required to build naabu.
+    log_info "Installing libpcap-dev..."
+    sudo apt-get install -y libpcap-dev
+
+    # Pip helper to support PEP 668 externally managed environments
+    pip_install() {
+        if pip3 install --help 2>&1 | grep -q "break-system-packages"; then
+            pip3 install --break-system-packages "$@"
+        else
+            pip3 install "$@"
+        fi
+    }
 
     # wafw00f
     if ! command_exists wafw00f; then
         log_info "Installing wafw00f..."
-        pip3 install wafw00f
+        pip_install wafw00f
     fi
 
     # tldextract
     if ! command_exists tldextract; then
         log_info "Installing tldextract..."
-        pip3 install tldextract
+        pip_install tldextract
     fi
 
     log_info "Security tools installed"
@@ -110,13 +115,22 @@ install_security_tools() {
 install_python_deps() {
     log_info "Installing Python dependencies..."
     
+    # Helper to support PEP 668 externally managed environments
+    pip_install() {
+        if pip3 install --help 2>&1 | grep -q "break-system-packages"; then
+            pip3 install --break-system-packages "$@"
+        else
+            pip3 install "$@"
+        fi
+    }
+
     # Upgrade pip
-    pip3 install --upgrade pip
+    pip_install --upgrade pip || log_warn "pip upgrade failed, proceeding..."
     
     # Install Python packages
-    pip3 install requests urllib3 python-dateutil pytz beautifulsoup4 lxml
-    pip3 install colorama tqdm rich PyYAML python-dotenv validators
-    pip3 install scapy dirsearch
+    pip_install requests urllib3 python-dateutil pytz beautifulsoup4 lxml
+    pip_install colorama tqdm rich PyYAML python-dotenv validators
+    pip_install scapy dirsearch
     
     log_info "Python dependencies installed"
 }
@@ -124,10 +138,6 @@ install_python_deps() {
 # Install Go tools
 install_go_tools() {
     log_info "Installing Go tools..."
-    
-    # Set up Go bin directory
-    #export GOPATH="$HOME/go"
-    #export PATH="$PATH:$GOPATH/bin"
     
     GOPATH="${GOPATH:-$HOME/go}"
     mkdir -p "$GOPATH/bin"
@@ -137,12 +147,10 @@ install_go_tools() {
     go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest 2>/dev/null || log_warn "subfinder install failed"
     go install -v github.com/d3mondev/puredns/v2@latest 2>/dev/null || log_warn "puredns install failed"
     go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest 2>/dev/null || log_warn "dnsx install failed"
-    #go install -v github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest 2>/dev/null || log_warn "shuffledns install failed"
-    #go install -v github.com/projectdiscovery/alterx/cmd/alterx@latest 2>/dev/null || log_warn "alterx install failed"
     go install -v github.com/hakluke/haktrails@latest 2>/dev/null || log_warn "haktrails install failed"
     go install -v github.com/tomnomnom/anew@latest 2>/dev/null || log_warn "anew install failed"
 
-    # naabu requires libpcap (installed in install_security_tools) to build with CGO.
+    # naabu requires libpcap-dev to build with CGO.
     CGO_ENABLED=1 go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest 2>/dev/null || log_warn "naabu install failed"
     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest 2>/dev/null || log_warn "httpx install failed"
     go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest 2>/dev/null || log_warn "nuclei install failed"
@@ -155,9 +163,8 @@ install_go_tools() {
     go install -v github.com/trufflesecurity/trufflehog/v3/cmd/trufflehog@latest 2>/dev/null || log_warn "trufflehog install failed"
     go install -v github.com/dwisiswant0/bhedak@latest 2>/dev/null || log_warn "bhedak install failed"
     go install -v github.com/hahwul/dalfox/v2@latest 2>/dev/null || log_warn "dalfox install failed"
-    #go install -v github.com/projectdiscovery/cvemap/cmd/cvemap@latest 2>/dev/null || log_warn "cvemap install failed"
     
-    log_info "Go tools installation attempted (some may have failed - check errors above)"
+    log_info "Go tools installation attempted"
 }
 
 # Setup directories and wordlists
@@ -197,9 +204,22 @@ setup_directories() {
         fi
     fi
 
-    # Add Go bin to PATH
-    #echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.zshrc
-    #echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bashrc
+    # Add Go bin to PATH if not already present
+    local go_path_str='export PATH="$PATH:$HOME/go/bin"'
+    if [ -f ~/.bashrc ]; then
+        if ! grep -q 'go/bin' ~/.bashrc; then
+            echo "" >> ~/.bashrc
+            echo "$go_path_str" >> ~/.bashrc
+            log_info "Added Go bin path to ~/.bashrc"
+        fi
+    fi
+    if [ -f ~/.zshrc ]; then
+        if ! grep -q 'go/bin' ~/.zshrc; then
+            echo "" >> ~/.zshrc
+            echo "$go_path_str" >> ~/.zshrc
+            log_info "Added Go bin path to ~/.zshrc"
+        fi
+    fi
 
     log_info "Directories and wordlists set up"
 }
@@ -246,27 +266,25 @@ finalize_setup() {
     cp requirements.txt ~/easm-pipeline/ 2>/dev/null || true
     
     log_info "========================================"
-    log_info "ARISE Setup Complete!"
+    log_info "ARISE Linux Setup Complete!"
     log_info "Summon Every Hidden Exposure."
     log_info "========================================"
     log_info "Next steps:"
-    log_info "1. Open a new terminal to load PATH changes"
+    log_info "1. Open a new shell or run 'source ~/.bashrc' to load Go environment variables"
     log_info "2. Run: python3 arise.py --hosts hosts.txt   (or: bash easm-pipeline.sh <target_domain>)"
     log_info ""
     log_info "To enable haktrails, add your API keys:"
     log_info "   nano ~/.config/haktools/haktrails-config.yml"
-    log_info "   OR"
-    log_info "   open ~/.config/haktools/haktrails-config.yml"
     log_info "========================================"
 }
 
 # Main execution
 main() {
     echo ""
-    log_info "Starting Mac mini setup for ARISE..."
+    log_info "Starting Linux setup for ARISE..."
     echo ""
     
-    install_homebrew
+    update_package_lists
     install_core_utils
     install_security_tools
     install_python_deps

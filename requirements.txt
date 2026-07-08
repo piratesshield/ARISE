@@ -1,34 +1,27 @@
-# ARISE - "Summon Every Hidden Exposure." - Mac mini Setup Requirements
-# This file lists all dependencies for setting up a fresh Mac mini for ARISE security research
+# ARISE - "Summon Every Hidden Exposure." - Linux Setup Requirements
+# This file lists all dependencies for setting up a Linux environment for ARISE EASM security research
 # Run: pip3 install -r requirements.txt
-# Install Xcode Command Line Tools: xcode-select --install
 
 # ==============================================================================
 # SYSTEM PRE-REQUISITES (Run these FIRST in terminal)
 # ==============================================================================
-# 1. Install Xcode Command Line Tools
-#    xcode-select --install
+# 1. Update package lists
+#    sudo apt-get update -y
 #
-# 2. Install Homebrew (if not already installed)
-#    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# 2. Install core utilities & build tools
+#    sudo apt-get install -y build-essential wget curl git jq python3 python3-pip python3-venv golang
 #
-# 3. Install core utilities
-#    brew install wget curl git jq python3 golang
+# 3. Install Nmap
+#    sudo apt-get install -y nmap
 #
-# 4. Install Nmap
-#    brew install nmap
+# 4. Install libpcap-dev (required to build naabu)
+#    sudo apt-get install -y libpcap-dev
 #
-# 5. Install wafw00f
-#    pip3 install wafw00f
+# 5. Install MassDNS (required by puredns)
+#    (setup.sh handles compiling this from source automatically)
 #
-# 6. Install tldextract
-#    pip3 install tldextract
-#
-# 7. Install libpcap (required to build naabu)
-#    brew install libpcap
-#
-# 8. Install massdns (required by puredns)
-#    brew install massdns
+# 6. Install global Python packages (if needed)
+#    pip3 install wafw00f tldextract
 
 # ==============================================================================
 # PYTHON DEPENDENCIES (pip3 install -r requirements.txt)
@@ -84,7 +77,7 @@ dirsearch>=0.4.3
 # GO TOOLS (Install via: go install tool@latest)
 # ==============================================================================
 # These tools are required for the ARISE pipeline. Install them in order:
-# NOTE: naabu requires libpcap first -> brew install libpcap
+# NOTE: naabu requires libpcap first -> sudo apt-get install libpcap-dev
 
 # Subdomain enumeration
 # go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
