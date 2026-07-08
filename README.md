@@ -58,10 +58,10 @@ The script installs Xcode Command Line Tools, Homebrew, Go, Python, core utiliti
 bash setup.sh
 ```
 
-### 2. Install Python Dependencies
-Install the required python libraries using pip:
+### 2. Install Dependencies
+
 ```bash
-pip3 install -r requirements.txt
+Follow the instrctions at requirements.txt
 ```
 
 ### 3. Add API Keys (Optional but Recommended)
