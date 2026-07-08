@@ -1,4 +1,5 @@
-# ARISE — "Summon Every Hidden Exposure."
+<img width="1376" height="768" alt="Gemini_Generated_Image_sx241bsx241bsx24" src="https://github.com/user-attachments/assets/ef0f77b0-2949-4c5b-96e9-1a564f175d7e" />
+
 
 ARISE is a professional-grade, state-driven **External Attack Surface Monitoring (EASM)** prototype. It converts standard target lists into a fully structured exposure map by executing a complete 14-module reconnaissance, finger-printing, and vulnerability prioritization pipeline. It features WAF-aware scanning, EPSS-prioritized vulnerability mapping, and real-time visualization via a Flask-based interactive dashboard.
 
