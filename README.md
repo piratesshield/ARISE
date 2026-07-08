@@ -63,13 +63,6 @@ bash setup.sh
 ```bash
 Follow the instrctions at requirements.txt
 ```
-
-### 3. Add API Keys (Optional but Recommended)
-To enable active checks via external APIs (Shodan, Censys, SecurityTrails, VirusTotal, GitHub, Haktrails), update the configuration file created during setup:
-```bash
-nano ~/.config/haktools/haktrails-config.yml
-```
-
 ---
 
 ## 🚀 Running ARISE
