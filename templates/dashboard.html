@@ -512,7 +512,7 @@
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th>Score</th><th>Category</th><th>Host</th><th>Severity</th><th>Model</th><th>Tool</th><th>Evidence</th></tr></thead>
+                            <thead><tr><th>Score</th><th>Category</th><th>Host</th><th>Severity</th><th>Tool</th><th>Evidence</th></tr></thead>
                             <tbody id="cloudBody"></tbody>
                         </table>
                     </div>
@@ -1173,11 +1173,10 @@ function renderCloudTable() {
             <td><b>${esc(f.category_label||f.template||'—')}</b><br>${providerBadge(provText)}</td>
             <td><span class="host-link">${esc(f.host||'—')}</span></td>
             <td><span class="badge ${sevClass(f.severity)}">${esc(f.severity)}</span></td>
-            <td><span class="model-tag">${(f.base_weight||0)}×${(f.exploitability||0)}×${(f.exposure||0)}</span></td>
             <td style="color:var(--text-dim)">${esc(f.detection_tool||f.tool||'—')}</td>
             <td style="color:var(--text-faint);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((f.evidence||f.impact||'—').slice(0,160))}</td>
         </tr>`;
-    }).join('') || `<tr><td colspan="7"><div class="empty"><div style="display:flex;justify-content:center;gap:14px;margin-bottom:12px">${providerSVG('aws')}${providerSVG('gcp')}${providerSVG('azure')}</div>No cloud exposure findings. Run the cloud exposure module (17_cloud_exposure) to detect AWS, GCP &amp; Azure misconfigurations.</div></td></tr>`;
+    }).join('') || `<tr><td colspan="6"><div class="empty"><div style="display:flex;justify-content:center;gap:14px;margin-bottom:12px">${providerSVG('aws')}${providerSVG('gcp')}${providerSVG('azure')}</div>No cloud exposure findings. Run the cloud exposure module (17_cloud_exposure) to detect AWS, GCP &amp; Azure misconfigurations.</div></td></tr>`;
 }
 
 /* ---- CVEs ---- */
