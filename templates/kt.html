@@ -163,6 +163,13 @@ tr:hover td { background:var(--surface-2); }
                 <tr><td><code>autoswagger</code></td><td>Swagger/OpenAPI spec discovery</td></tr>
                 <tr><td><code>RESTler</code></td><td>REST API stateful fuzzing (Microsoft)</td></tr>
             </table>
+            <h3>Cloud Recon &amp; Audit</h3>
+            <table>
+                <tr><td><code>cloud_enum</code></td><td>AWS/GCP/Azure bucket enumeration (Phase 2)</td></tr>
+                <tr><td><code>s3scanner</code></td><td>Anonymous S3/GCS/Azure access + object listing (Phase 2)</td></tr>
+                <tr><td><code>prowler</code></td><td>Authenticated CIS/PCI/HIPAA audit (Phase 3, opt-in)</td></tr>
+                <tr><td><code>scoutsuite</code></td><td>Authenticated multi-cloud audit (Phase 3, opt-in)</td></tr>
+            </table>
             <h3>Platform</h3>
             <table>
                 <tr><td><code>Python 3</code></td><td>Orchestrator + dashboard (Flask)</td></tr>
@@ -202,8 +209,31 @@ tr:hover td { background:var(--surface-2); }
     </div>
 
     <h2 id="cloud">5. Cloud Exposure Detection</h2>
-    <p>Module 17 runs custom nuclei templates against discovered hosts, then scores each finding with a weighted model:</p>
+    <p>Module 17 is <b>cloud-only</b>. It runs in three phases and scores each finding with a weighted model. App/API vulnerabilities (XSS, SQLi, SSRF, IDOR, JWT) never appear on the Cloud dashboard — a category whitelist keeps them in the Vulns/API tabs.</p>
     <pre><code>weighted_score = base_weight &times; exploitability &times; exposure</code></pre>
+
+    <div class="card">
+        <h3>Three-phase pipeline</h3>
+        <table>
+            <thead><tr><th>Phase</th><th>What</th><th>Tools</th><th>Auth</th></tr></thead>
+            <tbody>
+                <tr><td><b>1. Detection</b></td><td>Misconfiguration scanning + origin-bypass + leaked creds + email posture</td><td><code>nuclei</code> + custom cloud-templates, <code>dig</code>, <code>trufflehog</code></td><td>None (external)</td></tr>
+                <tr><td><b>2. Storage recon</b></td><td>Enumerate S3/GCS/Azure buckets from the target keyword, then check anonymous access + list objects</td><td><code>cloud_enum</code> &rarr; <code>s3scanner</code></td><td>None (external)</td></tr>
+                <tr><td><b>3. Compliance audit</b></td><td>Account-wide CIS/PCI/HIPAA checks against the cloud APIs</td><td><code>prowler</code> or <code>scoutsuite</code></td><td><b>Requires cloud credentials</b> — OFF by default</td></tr>
+            </tbody>
+        </table>
+        <p style="font-size:13px;color:var(--text-secondary)"><b>Why Phase 3 is gated:</b> Prowler/ScoutSuite scan a cloud account from the inside via authenticated APIs. In an external scan you don't have the target's credentials, so Phase 3 stays off unless the operator sets <code>CLOUD_AUDIT_ENABLED=true</code> and supplies credentials (auditing your own estate, or authorized post-compromise).</p>
+    </div>
+
+    <div class="card">
+        <h3>Cloud dashboard layout</h3>
+        <ul>
+            <li><b>Recon &amp; estate inventory</b> — cloud providers per host (from httpx tech), CDN/edge fronting, exposed origin IPs (direct, not behind CDN), enumerated storage buckets</li>
+            <li><b>Security findings</b> — scored misconfigurations, grouped into <i>security</i> (public storage, K8s, metadata, Terraform state, CI/CD, datastores, origin bypass, debug) and <i>posture</i> (missing WAF, missing SPF/DKIM/DMARC)</li>
+            <li><b>Compliance audit</b> — hidden unless Phase 3 ran; shows failed CIS/PCI checks by service</li>
+        </ul>
+    </div>
+
     <div class="card">
         <h3>Cloud Finding Categories</h3>
         <table>
@@ -347,8 +377,14 @@ python3 arise.py --env PORT_SCAN_MODE=fast --env NAABU_RATE=5000</code></pre>
             <tr><td><code>APISEC_AUTH_REFRESH_SEC</code></td><td>300</td><td>Token refresh interval (seconds)</td></tr>
             <tr><td><code>NUCLEI_THREADS</code></td><td>25</td><td>Parallel nuclei template execution</td></tr>
             <tr><td><code>HTTPX_THREADS</code></td><td>100</td><td>HTTP probing concurrency</td></tr>
+            <tr><td><code>CLOUD_BUCKET_ENUM_ENABLED</code></td><td>true</td><td>Phase 2 — external S3/GCS/Azure bucket enumeration</td></tr>
+            <tr><td><code>CLOUD_BUCKET_MUTATIONS</code></td><td>(empty)</td><td>Extra comma-separated keywords for bucket brute-forcing</td></tr>
+            <tr><td><code>CLOUD_AUDIT_ENABLED</code></td><td>false</td><td>Phase 3 master switch — authenticated compliance audit (needs cloud creds)</td></tr>
+            <tr><td><code>CLOUD_AUDIT_PROVIDER</code></td><td>aws</td><td>Provider for Phase 3: <code>aws</code> | <code>gcp</code> | <code>azure</code></td></tr>
+            <tr><td><code>CLOUD_AUDIT_TOOL</code></td><td>prowler</td><td>Audit engine: <code>prowler</code> | <code>scoutsuite</code></td></tr>
         </tbody>
     </table>
+    <p style="font-size:13px;color:var(--text-secondary)">Phase 3 also reads standard cloud credential env vars: <code>AWS_ACCESS_KEY_ID</code>/<code>AWS_PROFILE</code>, <code>GOOGLE_APPLICATION_CREDENTIALS</code>, or <code>AZURE_CLIENT_ID</code>/<code>AZURE_SUBSCRIPTION_ID</code>. Without them the audit is skipped even when enabled.</p>
 
     <div style="text-align:center;color:var(--text-faint);margin-top:48px;font-size:12px">
         ARISE Knowledge Transfer Document &mdash; Generated for internal use

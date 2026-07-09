@@ -182,6 +182,16 @@
     .b-ok { background: rgba(52,211,153,.16); color: var(--ok); }
     .b-muted { background: var(--surface-2); color: var(--text-dim); }
     .pill { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; background: var(--surface-2); color: var(--text-dim); }
+    .tech-tags { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+    .tech-tag { padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; background: rgba(79,140,255,.16); color: var(--accent); white-space: nowrap; }
+    .tech-tag.cloud { background: rgba(127,92,255,.16); color: #7c5cff; }
+    .tech-tag.cdn { background: rgba(52,211,153,.16); color: var(--ok); }
+    .tech-tag.web-server { background: rgba(255,196,61,.16); color: var(--med); }
+    .tech-tag.frontend { background: rgba(255,138,61,.16); color: var(--high); }
+    .tech-tag.backend { background: rgba(79,140,255,.16); color: var(--accent); }
+    .tech-tag.cms { background: rgba(196,181,253,.16); color: #c4b5fd; }
+    .tech-tag.database { background: rgba(248,113,113,.16); color: #f87171; }
+    .tech-tag.security { background: rgba(244,63,94,.16); color: #f43f5e; }
 
     .risk-chip { display: inline-flex; align-items: center; gap: 8px; }
     .risk-dot { width: 9px; height: 9px; border-radius: 50%; }
@@ -276,7 +286,23 @@
     .provider-gcp { background:rgba(66,133,244,.12); color:#4285f4; }
     .provider-azure { background:rgba(0,120,212,.12); color:#0078d4; }
     .provider-multi { background:rgba(127,127,255,.12); color:#7c5cff; }
+    .provider-cloudflare { background:rgba(244,129,32,.12); color:#f48120; }
+    .provider-fastly { background:rgba(255,40,45,.12); color:#ff282d; }
+    .provider-akamai { background:rgba(0,153,204,.12); color:#0099cc; }
     .provider-unknown { background:var(--surface-2); color:var(--text-dim); }
+
+    /* Cloud section labels + recon */
+    .section-label { display:flex; align-items:center; gap:9px; font-size:13px; font-weight:700;
+        letter-spacing:.3px; color:var(--text); text-transform:uppercase; margin-bottom:14px; }
+    .section-label .ico { width:26px; height:26px; }
+    .section-label .ico svg { width:15px; height:15px; }
+    .access-badge { display:inline-block; padding:2px 8px; border-radius:5px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
+    .access-public { background:rgba(255,77,109,.16); color:var(--crit); }
+    .access-exists { background:rgba(255,196,61,.14); color:var(--med); }
+    .access-private { background:rgba(90,209,224,.12); color:var(--low); }
+    .recon-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px;
+        background:var(--surface-2); font-size:12px; font-weight:600; }
+    .recon-pill .n { font-variant-numeric:tabular-nums; }
 
     .loading { text-align: center; padding: 60px; color: var(--text-faint); }
     .spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--accent);
@@ -414,11 +440,13 @@
                     <div class="chip" data-filter="api">API</div>
                     <div class="chip" data-filter="cdn">CDN</div>
                     <div class="chip" data-filter="dangling">Dangling</div>
+                    <button class="btn" onclick="exportTableToCSV('assetsBody', 'assets.csv')" style="margin-left:auto">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('Assets', cache.hosts)">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th>Asset</th><th>IP</th><th>Status</th><th>Server</th><th>WAF</th><th>Ports</th><th>Findings</th><th>Risk</th></tr></thead>
+                            <thead><tr><th>Asset</th><th>IP</th><th>Status</th><th>Server</th><th>WAF</th><th>CDN</th><th>Tech Stack</th><th>Ports</th><th>Findings</th><th>Risk</th></tr></thead>
                             <tbody id="assetsBody"></tbody>
                         </table>
                     </div>
@@ -429,6 +457,8 @@
             <section class="view" id="view-vulns">
                 <div class="toolbar">
                     <input class="search" id="vulnSearch" placeholder="Search finding, host or CVE…">
+                    <button class="btn" onclick="exportTableToCSV('vulnsBody', 'vulnerabilities.csv')" style="margin-left:auto">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('Vulnerabilities', cache.vulns)">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
@@ -444,6 +474,31 @@
             <section class="view" id="view-cloud">
                 <div id="cloudProviderBar" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap"></div>
                 <div class="grid stats-grid" id="cloudStats" style="margin-top:0"></div>
+
+                <!-- Cloud recon inventory -->
+                <div class="section-label" style="margin-top:22px"><span class="ico"><svg viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/><circle cx="12" cy="14" r="1.5"/></svg></span> <span id="cloudReconLabel">Cloud Recon &amp; Estate Inventory</span></div>
+                <div class="grid cols-2" id="cloudReconTop"></div>
+                <div class="card" id="cloudBucketsCard" style="padding:0;margin-top:14px;display:none">
+                    <h3 style="padding:14px 18px 0"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span> Storage Buckets Discovered</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Bucket</th><th>Provider</th><th>Access</th><th>Objects</th><th>Source</th><th>URL</th></tr></thead>
+                            <tbody id="cloudBucketsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card" id="cloudOriginCard" style="padding:0;margin-top:14px;display:none">
+                    <h3 style="padding:14px 18px 0"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></span> Exposed Origin IPs (direct, not behind CDN)</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Host</th><th>Origin IP</th><th>Provider</th><th>Server</th></tr></thead>
+                            <tbody id="cloudOriginBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Cloud security findings -->
+                <div class="section-label" style="margin-top:26px"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v6c0 5 3 8 8 9 5-1 8-4 8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span> Cloud Security Findings</div>
                 <div class="grid cols-2" id="cloudBreakdown"></div>
                 <div class="toolbar" style="margin-top:16px">
                     <input class="search" id="cloudSearch" placeholder="Search host, category or evidence…">
@@ -451,6 +506,8 @@
                     <div class="chip" data-cloudsev="critical">Critical</div>
                     <div class="chip" data-cloudsev="high">High</div>
                     <div class="chip" data-cloudsev="medium">Medium</div>
+                    <button class="btn" onclick="exportTableToCSV('cloudBody', 'cloud-findings.csv')" style="margin-left:auto">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('CloudFindings', cache.cloud.findings || [])">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
@@ -458,6 +515,20 @@
                             <thead><tr><th>Score</th><th>Category</th><th>Host</th><th>Severity</th><th>Model</th><th>Tool</th><th>Evidence</th></tr></thead>
                             <tbody id="cloudBody"></tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Phase 3: authenticated compliance audit (hidden unless run) -->
+                <div id="cloudComplianceWrap" style="display:none">
+                    <div class="section-label" style="margin-top:26px"><span class="ico"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> <span id="cloudComplianceLabel">Compliance Audit</span></div>
+                    <div class="grid stats-grid" id="cloudComplianceStats" style="margin-top:0"></div>
+                    <div class="card" style="padding:0;margin-top:14px">
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Severity</th><th>Check</th><th>Service</th><th>Region</th><th>Resource</th><th>Framework</th></tr></thead>
+                                <tbody id="cloudComplianceBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -472,6 +543,8 @@
                     <div class="chip" data-portrisk="critical">Critical</div>
                     <div class="chip" data-portrisk="high">High</div>
                     <div class="chip" data-portrisk="medium">Medium</div>
+                    <button class="btn" onclick="exportTableToCSV('portsBody', 'ports.csv')" style="margin-left:auto">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('Ports', cache.services.services || [])">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
@@ -487,6 +560,10 @@
             <section class="view" id="view-cves">
                 <div class="grid cols-3" style="margin-top:0" id="cveSummary"></div>
                 <div class="card" style="margin-top:16px;padding:0">
+                    <div style="padding:12px 14px;display:flex;gap:8px;border-bottom:1px solid var(--border);justify-content:flex-end">
+                        <button class="btn" onclick="exportTableToCSV('cvesBody', 'cves.csv')">CSV</button>
+                        <button class="btn" onclick="exportTableToJSON('CVEs', cache.cves || [])">JSON</button>
+                    </div>
                     <div class="table-wrap">
                         <table>
                             <thead><tr><th>CVE</th><th>Severity</th><th>Affected Hosts</th><th>Template</th><th>CWE</th></tr></thead>
@@ -505,6 +582,8 @@
                     <div class="chip" data-tool="autoswagger">Autoswagger · auth/authz</div>
                     <div class="chip" data-tool="restler">RESTler · robustness</div>
                     <input class="search" id="apisecSearch" placeholder="Search endpoint or issue…" style="margin-left:auto">
+                    <button class="btn" onclick="exportTableToCSV('apisecBody', 'api-security.csv')">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('APIFindings', cache.apisec.findings || [])">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
@@ -524,6 +603,8 @@
                     <div class="chip" data-dir="403">403 Forbidden</div>
                     <div class="chip" data-dir="500">500 Error</div>
                     <input class="search" id="dirSearch" placeholder="Search path…" style="margin-left:auto">
+                    <button class="btn" onclick="exportTableToCSV('dirsBody', 'directories.csv')">CSV</button>
+                    <button class="btn" onclick="exportTableToJSON('Directories', cache.dirs || [])">JSON</button>
                 </div>
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
@@ -606,6 +687,38 @@ function donut(size, stroke, segments, centerHTML, trackColor) {
     const track = `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${trackColor||'#1b2440'}" stroke-width="${stroke}"/>`;
     return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${track}${arcs}</svg>` +
            (centerHTML ? `<div class="label">${centerHTML}</div>` : '');
+}
+
+/* =====================================================================
+   DATA EXPORT
+   ===================================================================== */
+function exportTableToCSV(tableBodyId, filename) {
+    const body = document.getElementById(tableBodyId);
+    const rows = Array.from(body.querySelectorAll('tr'));
+    const csv = rows.map(tr => {
+        const cells = Array.from(tr.querySelectorAll('td'));
+        return cells.map(td => {
+            const text = td.textContent.trim().replace(/"/g, '""');
+            return `"${text}"`;
+        }).join(',');
+    }).join('\n');
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+function exportTableToJSON(name, data) {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], {type: 'application/json'});
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (name || 'export').toLowerCase() + '.json';
+    a.click();
+    window.URL.revokeObjectURL(url);
 }
 
 /* =====================================================================
@@ -790,9 +903,17 @@ function riskChip(h){
 /* ---- Assets ---- */
 function renderAssets() {
     const q = (document.getElementById('assetSearch').value||'').toLowerCase();
+    const techByHost = {};
+    (cache.techstack?.technologies || []).forEach(t => {
+        (t.hosts || []).forEach(host => {
+            if (!techByHost[host]) techByHost[host] = [];
+            techByHost[host].push({name: t.name, category: t.category});
+        });
+    });
+
     let rows = cache.hosts.filter(h => {
         if (assetFilter==='http' && !h.http_status) return false;
-        if (assetFilter==='waf' && (!h.waf_vendor || h.waf_vendor==='none')) return false;
+        if (assetFilter==='waf' && (!h.waf_vendor || (h.waf_vendor||'').toLowerCase() === 'none' || (h.waf_vendor||'').toLowerCase() === '')) return false;
         if (assetFilter==='api' && !h.is_api) return false;
         if (assetFilter==='cdn' && !h.cdn) return false;
         if (assetFilter==='dangling' && !h.ssl_dangling) return false;
@@ -804,16 +925,20 @@ function renderAssets() {
         const fc = findingsCount(h.host);
         const allP = h.ports_open || [];
         const ports = allP.slice(0,4).join(', ') + (allP.length>4?' +'+(allP.length-4):'');
+        const techs = (techByHost[h.host] || []).slice(0,3);
+        const techHTML = techs.length ? '<div class="tech-tags">' + techs.map(t => `<span class="tech-tag ${t.category}">${esc(t.name)}</span>`).join('') + (techByHost[h.host].length > 3 ? `<span class="pill">+${techByHost[h.host].length-3}</span>` : '') + '</div>' : '<span class="pill" style="opacity:.4">—</span>';
         return `<tr class="clickable" onclick="openHost('${attr(h.host)}')">
             <td><span class="host-link">${esc(h.host)}${h.is_api?' <span class="pill" style="color:var(--accent)">API</span>':''}<span class="chev">›</span></span></td>
             <td style="color:var(--text-dim)">${esc(h.ip||'—')}</td>
             <td>${statusBadge(h.http_status)}</td>
             <td style="color:var(--text-dim)">${esc(h.server_banner||'—')}</td>
             <td>${wafBadge(h.waf_vendor)}</td>
+            <td>${h.cdn?'<span class="badge b-ok">CDN</span>':'<span class="pill">—</span>'}</td>
+            <td style="font-size:12px">${techHTML}</td>
             <td style="color:var(--text-dim)">${ports||'—'}</td>
             <td>${fc?`<span class="badge b-high">${fc}</span>`:'<span class="pill">0</span>'}</td>
             <td>${riskChip(h)}</td></tr>`;
-    }).join('') || `<tr><td colspan="8" class="empty">No matching assets</td></tr>`;
+    }).join('') || `<tr><td colspan="10" class="empty">No matching assets</td></tr>`;
 }
 
 /* ---- Vulns ---- */
@@ -896,45 +1021,40 @@ function renderPortsTable() {
 }
 
 /* ---- Cloud Exposure ---- */
+const PROVIDER_LABELS = {aws:'AWS', gcp:'GCP', azure:'Azure', cloudflare:'Cloudflare', fastly:'Fastly', akamai:'Akamai', multi:'Multi', unknown:'Other'};
 function renderCloud() {
     const c = cache.cloud || {};
     const findings = c.findings || [];
     const bySev = c.by_severity || {};
     const cats = c.categories || [];
     const total = c.total || 0;
+    const recon = c.recon || {providers:{}, cdn_breakdown:{}, origin_ips:[], buckets:[], bucket_summary:{}, cloud_hosts:0, total_hosts:0};
 
-    // Detect dominant provider from findings
-    const allText = findings.map(f=>(f.category_label||'')+ ' '+(f.cloud_category||'')+' '+(f.host||'')+' '+(f.evidence||'')+' '+(f.detection_tool||'')).join(' ');
-    const awsN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='aws').length;
-    const gcpN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='gcp').length;
-    const azN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='azure').length;
-    const otherN = total - awsN - gcpN - azN;
-
-    // Stats with provider icons
-    const topScore = findings.length ? Math.max(...findings.map(f=>f.weighted_score||0)) : 0;
-    const providerStats = [];
-    if (awsN) providerStats.push(`${providerSVG('aws')}<span style="margin-left:2px">${awsN}</span>`);
-    if (gcpN) providerStats.push(`${providerSVG('gcp')}<span style="margin-left:2px">${gcpN}</span>`);
-    if (azN) providerStats.push(`${providerSVG('azure')}<span style="margin-left:2px">${azN}</span>`);
-
-    // Provider bar
+    // Provider bar — authoritative estate inventory from recon (httpx tech),
+    // falling back to a faded placeholder when nothing has been scanned yet.
+    const provEntries = Object.entries(recon.providers || {}).sort((a,b)=>b[1]-a[1]);
     const provBar = [];
-    if (awsN) provBar.push(`<span class="provider-badge provider-aws" style="padding:6px 14px;font-size:13px">${providerSVG('aws')} AWS <b>${awsN}</b></span>`);
-    if (gcpN) provBar.push(`<span class="provider-badge provider-gcp" style="padding:6px 14px;font-size:13px">${providerSVG('gcp')} GCP <b>${gcpN}</b></span>`);
-    if (azN) provBar.push(`<span class="provider-badge provider-azure" style="padding:6px 14px;font-size:13px">${providerSVG('azure')} Azure <b>${azN}</b></span>`);
-    if (otherN > 0 && total) provBar.push(`<span class="provider-badge provider-unknown" style="padding:6px 14px;font-size:13px">${icon('cloud')} Other <b>${otherN}</b></span>`);
-    if (!total) provBar.push(`<span class="provider-badge provider-aws" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('aws')} AWS</span>`,
-        `<span class="provider-badge provider-gcp" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('gcp')} GCP</span>`,
-        `<span class="provider-badge provider-azure" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('azure')} Azure</span>`);
+    if (provEntries.length) {
+        provEntries.forEach(([p,n]) => {
+            const cls = ['aws','gcp','azure','cloudflare','fastly','akamai'].includes(p) ? 'provider-'+p : 'provider-unknown';
+            provBar.push(`<span class="provider-badge ${cls}" style="padding:6px 14px;font-size:13px">${providerSVG(p)} ${PROVIDER_LABELS[p]||p} <b>${n}</b></span>`);
+        });
+    } else {
+        ['aws','gcp','azure'].forEach(p =>
+            provBar.push(`<span class="provider-badge provider-${p}" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG(p)} ${PROVIDER_LABELS[p]}</span>`));
+    }
     document.getElementById('cloudProviderBar').innerHTML = provBar.join('');
 
+    // Top stat cards — separate security findings from posture, surface buckets
+    const bkt = recon.bucket_summary || {};
     document.getElementById('cloudStats').innerHTML = `
-        <div class="stat"><div class="icn" style="background:rgba(127,92,255,.12);color:#7c5cff">${icon('cloud')}</div><div class="v">${total}</div><div class="k">Cloud Findings</div></div>
-        <div class="stat"><div class="icn" style="background:rgba(255,77,109,.14);color:var(--crit)">${icon('shield')}</div><div class="v" style="color:var(--crit)">${bySev.critical||0}</div><div class="k">Critical</div></div>
-        <div class="stat"><div class="icn" style="background:rgba(255,138,61,.14);color:var(--high)">${icon('shield')}</div><div class="v" style="color:var(--high)">${bySev.high||0}</div><div class="k">High</div></div>
-        <div class="stat"><div class="icn">${providerStats.length ? providerStats[0].split('<span')[0] : icon('cloud')}</div>
-            <div class="v" style="font-size:15px;display:flex;gap:10px;align-items:center">${providerStats.length ? providerStats.join(' ') : '<span style="font-size:22px">0.0</span>'}</div>
-            <div class="k">${providerStats.length ? 'Providers' : 'Top Score'}</div></div>`;
+        <div class="stat"><div class="icn" style="background:rgba(255,77,109,.14);color:var(--crit)">${icon('shield')}</div><div class="v" style="color:var(--crit)">${(bySev.critical||0)+(bySev.high||0)}</div><div class="k">Critical + High</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(127,92,255,.12);color:#7c5cff">${icon('shield')}</div><div class="v">${c.security_count||0}</div><div class="k">Security Issues</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(255,153,0,.14);color:#ff9900">${cloudBucketIcon()}</div><div class="v" style="color:${(bkt.public||0)?'var(--crit)':'inherit'}">${bkt.public||0}<span style="font-size:13px;color:var(--text-faint)">/${bkt.total||0}</span></div><div class="k">Public Buckets</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(90,209,224,.12);color:var(--low)">${icon('globe')}</div><div class="v">${recon.cloud_hosts||0}<span style="font-size:13px;color:var(--text-faint)">/${recon.total_hosts||0}</span></div><div class="k">Cloud-Hosted Assets</div></div>`;
+
+    // Recon inventory panel
+    renderCloudRecon(recon);
 
     // Breakdown: categories + severity
     const maxCat = Math.max(1, ...cats.map(c=>c.max_score||0));
@@ -943,12 +1063,95 @@ function renderCloud() {
         <div class="card"><h3><span class="ico">${icon('cloud')}</span> Categories by Top Score</h3>${
             cats.length ? cats.map(c => {
                 const pct = Math.round((c.max_score/maxCat)*100);
-                return `<div class="bar-row"><div class="name" style="width:140px;text-transform:none">${esc(c.label||c.name||'—')}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${scoreColor(c.max_score)}"></div></div><div class="val">${c.count} <span style="color:var(--text-faint);font-weight:400">×</span> ${c.max_score.toFixed?c.max_score.toFixed(0):c.max_score}</div></div>`;
+                return `<div class="bar-row"><div class="name" style="width:150px;text-transform:none">${esc(c.label||c.name||'—')}${c.group==='posture'?' <span style="font-size:9px;color:var(--text-faint)">·posture</span>':''}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${scoreColor(c.max_score)}"></div></div><div class="val">${c.count} <span style="color:var(--text-faint);font-weight:400">×</span> ${c.max_score.toFixed?c.max_score.toFixed(0):c.max_score}</div></div>`;
             }).join('') : emptyLine()}</div>
         <div class="card"><h3><span class="ico">${icon('shield')}</span> Severity Distribution</h3>${
             total ? SEV.map(k=>barRow(k, bySev[k]||0, maxSev, sevColor(k))).join('') : emptyLine()}</div>`;
 
     renderCloudTable();
+    renderCloudCompliance(c.compliance || {enabled:false});
+}
+
+function cloudBucketIcon(){ return '<svg viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/></svg>'; }
+
+function renderCloudRecon(recon) {
+    // Top row: provider inventory + CDN/edge breakdown
+    const provs = Object.entries(recon.providers||{}).sort((a,b)=>b[1]-a[1]);
+    const cdns = Object.entries(recon.cdn_breakdown||{}).sort((a,b)=>b[1]-a[1]);
+    const maxP = Math.max(1, ...provs.map(p=>p[1]));
+    const maxC = Math.max(1, ...cdns.map(c=>c[1]));
+    const provColor = {aws:'#ff9900', gcp:'#4285f4', azure:'#0078d4', cloudflare:'#f48120', fastly:'#ff282d', akamai:'#0099cc'};
+    document.getElementById('cloudReconTop').innerHTML = `
+        <div class="card"><h3><span class="ico">${icon('cloud')}</span> Cloud Providers <span style="color:var(--text-faint);font-weight:400;font-size:12px;margin-left:auto">${recon.cloud_hosts||0} of ${recon.total_hosts||0} hosts</span></h3>${
+            provs.length ? provs.map(([p,n]) => {
+                const pct = Math.round((n/maxP)*100);
+                return `<div class="bar-row"><div class="name" style="width:110px;text-transform:none;display:flex;align-items:center;gap:6px">${providerSVG(p)} ${PROVIDER_LABELS[p]||p}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${provColor[p]||'#8b98bd'}"></div></div><div class="val">${n}</div></div>`;
+            }).join('') : emptyLine()}</div>
+        <div class="card"><h3><span class="ico">${icon('web')}</span> CDN / Edge Fronting</h3>${
+            cdns.length ? cdns.map(([name,n]) => {
+                const pct = Math.round((n/maxC)*100);
+                return `<div class="bar-row"><div class="name" style="width:110px;text-transform:none">${esc(name)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:#34d399"></div></div><div class="val">${n}</div></div>`;
+            }).join('') : emptyLine()}</div>`;
+
+    // Buckets table
+    const buckets = recon.buckets || [];
+    const bcard = document.getElementById('cloudBucketsCard');
+    if (buckets.length) {
+        bcard.style.display = '';
+        document.getElementById('cloudBucketsBody').innerHTML = buckets.map(b => {
+            const acls = b.access==='public'?'access-public':(b.access==='exists'?'access-exists':'access-private');
+            const pcls = ['aws','gcp','azure'].includes(b.provider)?'provider-'+b.provider:'provider-unknown';
+            return `<tr>
+                <td><b>${esc(b.name)}</b></td>
+                <td><span class="provider-badge ${pcls}">${providerSVG(b.provider)} ${PROVIDER_LABELS[b.provider]||b.provider}</span></td>
+                <td><span class="access-badge ${acls}">${esc(b.access)}</span></td>
+                <td style="font-variant-numeric:tabular-nums">${b.files||0}</td>
+                <td style="color:var(--text-dim);font-size:11px">${esc(b.note||'—')}</td>
+                <td>${b.url?`<a href="${attr(b.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px">open ↗</a>`:'—'}</td>
+            </tr>`;
+        }).join('');
+    } else {
+        bcard.style.display = 'none';
+    }
+
+    // Origin IPs table
+    const origins = recon.origin_ips || [];
+    const ocard = document.getElementById('cloudOriginCard');
+    if (origins.length) {
+        ocard.style.display = '';
+        document.getElementById('cloudOriginBody').innerHTML = origins.map(o => `
+            <tr class="clickable" onclick="openHost('${attr(o.host)}')">
+                <td><span class="host-link">${esc(o.host)}</span></td>
+                <td><span class="badge b-high" style="font-family:ui-monospace,Menlo,monospace">${esc(o.ip)}</span></td>
+                <td><span class="provider-badge provider-${['aws','gcp','azure'].includes(o.provider)?o.provider:'unknown'}">${providerSVG(o.provider)} ${PROVIDER_LABELS[o.provider]||o.provider}</span></td>
+                <td style="color:var(--text-dim)">${esc(o.server||'—')}</td>
+            </tr>`).join('');
+    } else {
+        ocard.style.display = 'none';
+    }
+}
+
+function renderCloudCompliance(comp) {
+    const wrap = document.getElementById('cloudComplianceWrap');
+    if (!comp || !comp.enabled) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    const bySev = comp.by_severity || {};
+    document.getElementById('cloudComplianceLabel').textContent =
+        `Compliance Audit — ${(comp.tool||'authenticated').toUpperCase()} (${comp.total||0} failed checks)`;
+    document.getElementById('cloudComplianceStats').innerHTML = `
+        <div class="stat"><div class="icn" style="background:rgba(255,77,109,.14);color:var(--crit)">${icon('shield')}</div><div class="v" style="color:var(--crit)">${bySev.critical||0}</div><div class="k">Critical</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(255,138,61,.14);color:var(--high)">${icon('shield')}</div><div class="v" style="color:var(--high)">${bySev.high||0}</div><div class="k">High</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(255,196,61,.14);color:var(--med)">${icon('shield')}</div><div class="v">${bySev.medium||0}</div><div class="k">Medium</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(79,140,255,.12);color:var(--accent)">${icon('check')}</div><div class="v">${Object.keys(comp.by_service||{}).length}</div><div class="k">Services</div></div>`;
+    document.getElementById('cloudComplianceBody').innerHTML = (comp.findings||[]).map(f => `
+        <tr>
+            <td><span class="badge ${sevClass(f.severity)}">${esc(f.severity)}</span></td>
+            <td><b>${esc(f.title||f.check_id||'—')}</b>${f.check_id?`<br><span style="font-size:10px;color:var(--text-faint);font-family:ui-monospace,Menlo,monospace">${esc(f.check_id)}</span>`:''}</td>
+            <td style="color:var(--text-dim)">${esc(f.service||'—')}</td>
+            <td style="color:var(--text-dim)">${esc(f.region||'—')}</td>
+            <td style="color:var(--text-dim);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.resource||'—')}</td>
+            <td><span class="badge b-info">${esc(f.framework||'—')}</span></td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty">No failed compliance checks.</td></tr>`;
 }
 function renderCloudTable() {
     const q = (document.getElementById('cloudSearch').value||'').toLowerCase();

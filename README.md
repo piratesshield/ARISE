@@ -57,6 +57,14 @@ ARISE is a professional-grade, state-driven **External Attack Surface Monitoring
 | [autoswagger](https://github.com/AresS31/autoswagger) | Swagger/OpenAPI spec auto-discovery |
 | [RESTler](https://github.com/microsoft/restler-fuzzer) | Microsoft's stateful REST API fuzzer |
 
+### Cloud Recon & Audit
+| Tool | Purpose |
+|------|---------|
+| [cloud_enum](https://github.com/initstring/cloud_enum) | AWS/GCP/Azure storage bucket enumeration (Phase 2) |
+| [S3Scanner](https://github.com/sa7mon/S3Scanner) | Anonymous S3/GCS/Azure access checks + object listing (Phase 2) |
+| [Prowler](https://github.com/prowler-cloud/prowler) | Authenticated CIS/PCI/HIPAA compliance audit (Phase 3, opt-in) |
+| [ScoutSuite](https://github.com/nccgroup/ScoutSuite) | Authenticated multi-cloud security audit (Phase 3, opt-in) |
+
 ### Platform
 | Component | Purpose |
 |-----------|---------|
@@ -172,6 +180,21 @@ python3 arise.py --env NAABU_RATE=5000        # Port scan rate limit
 | `NAABU_RATE` | `1000` | Packets/sec for port scanning |
 | `APISEC_AUTH_TOKEN_CMD` | (empty) | Shell command to get API auth token for RESTler |
 | `APISEC_AUTH_REFRESH_SEC` | `300` | Token refresh interval in seconds |
+| `CLOUD_BUCKET_ENUM_ENABLED` | `true` | Phase 2 — external S3/GCS/Azure bucket enumeration |
+| `CLOUD_BUCKET_MUTATIONS` | (empty) | Extra comma-separated keywords for bucket brute-forcing |
+| `CLOUD_AUDIT_ENABLED` | `false` | Phase 3 — authenticated compliance audit (needs cloud creds) |
+| `CLOUD_AUDIT_PROVIDER` | `aws` | Phase 3 provider: `aws` \| `gcp` \| `azure` |
+| `CLOUD_AUDIT_TOOL` | `prowler` | Phase 3 engine: `prowler` \| `scoutsuite` |
+
+### Cloud dashboard (cloud-only)
+
+The **Cloud** tab is strictly cloud-scoped — app/API vulnerabilities (XSS, SQLi, SSRF, IDOR, JWT) are filtered out and live in the Vulns/API tabs. It has three zones:
+
+1. **Recon & estate inventory** — cloud providers per host, CDN/edge fronting, exposed origin IPs (direct, not behind CDN), enumerated storage buckets
+2. **Security findings** — scored misconfigurations grouped into *security* (public storage, K8s, metadata, Terraform state, CI/CD, datastores, origin bypass) and *posture* (missing WAF, missing SPF/DKIM/DMARC)
+3. **Compliance audit** — hidden unless Phase 3 ran with credentials
+
+> **Phase 3 is authenticated.** Prowler/ScoutSuite scan a cloud account from the inside via cloud APIs, so they need the target's own credentials. In an external scan you don't have these — Phase 3 stays off unless you set `CLOUD_AUDIT_ENABLED=true` and supply credentials (auditing your own estate, or authorized post-compromise).
 
 ---
 

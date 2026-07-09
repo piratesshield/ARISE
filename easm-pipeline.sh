@@ -63,6 +63,22 @@ WAFW00F="wafw00f"
 KATANA="katana"
 HAKTRAILS="haktrails"
 
+# Cloud recon + audit tooling (Module 17).
+CLOUDENUM="${CLOUDENUM:-cloud_enum}"          # AWS/GCP/Azure bucket enumeration
+S3SCANNER="${S3SCANNER:-s3scanner}"           # anonymous S3/GCS/Azure access check
+PROWLER="${PROWLER:-prowler}"                 # authenticated AWS/Azure/GCP audit
+SCOUTSUITE="${SCOUTSUITE:-scout}"             # authenticated multi-cloud audit
+
+# Phase 2 (external, unauthenticated) — bucket enumeration is safe recon and
+# runs by default. Phase 3 (authenticated compliance audit) needs the target's
+# own cloud credentials, so it stays OFF unless the operator explicitly enables
+# it and supplies credentials — you never have these in an external scan.
+CLOUD_BUCKET_ENUM_ENABLED="${CLOUD_BUCKET_ENUM_ENABLED:-true}"
+CLOUD_BUCKET_MUTATIONS="${CLOUD_BUCKET_MUTATIONS:-}"       # optional extra keywords, comma-sep
+CLOUD_AUDIT_ENABLED="${CLOUD_AUDIT_ENABLED:-false}"        # Phase 3 master switch
+CLOUD_AUDIT_PROVIDER="${CLOUD_AUDIT_PROVIDER:-aws}"        # aws|gcp|azure
+CLOUD_AUDIT_TOOL="${CLOUD_AUDIT_TOOL:-prowler}"            # prowler|scoutsuite
+
 # Safety/performance bounds for active testing. Override explicitly when authorized.
 PARAM_FUZZ_MAX_URLS="${PARAM_FUZZ_MAX_URLS:-50}"
 JS_DOWNLOAD_MAX="${JS_DOWNLOAD_MAX:-500}"
@@ -2873,6 +2889,251 @@ CREDEOF
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Phase 2 — external, unauthenticated cloud storage enumeration.
+# CloudEnum brute-forces bucket/blob names from the target keyword across AWS,
+# GCP and Azure; S3Scanner then checks anonymous access on the AWS hits and
+# lists contents where the ACL permits. No credentials required — pure recon.
+# Writes cloud_buckets.jsonl: {name, provider, access, url, files, note}
+# ---------------------------------------------------------------------------
+_cloud_bucket_enum() {
+    local target="$1"
+    local out="$2"
+    : > "$out"
+
+    if [ "$CLOUD_BUCKET_ENUM_ENABLED" != "true" ]; then
+        log_info "  Bucket enumeration disabled (CLOUD_BUCKET_ENUM_ENABLED=false)"
+        return 0
+    fi
+
+    # Keyword = the registrable label (howzat from howzat.com) plus any operator
+    # mutations. CloudEnum permutes these with common bucket affixes internally.
+    local keyword="${target%%.*}"
+    local raw_dir; raw_dir="$(dirname "$out")"
+    local cloudenum_raw="$raw_dir/cloudenum_raw.txt"
+    local s3_targets="$raw_dir/s3_candidate_buckets.txt"
+    : > "$s3_targets"
+
+    if command -v "$CLOUDENUM" &>/dev/null; then
+        log_info "  CloudEnum: enumerating AWS/GCP/Azure storage for '$keyword'..."
+        local kw_args=("-k" "$keyword" "-k" "$target")
+        if [ -n "$CLOUD_BUCKET_MUTATIONS" ]; then
+            local IFS_OLD="$IFS"; IFS=','
+            for m in $CLOUD_BUCKET_MUTATIONS; do
+                [ -n "$m" ] && kw_args+=("-k" "$m")
+            done
+            IFS="$IFS_OLD"
+        fi
+        "$CLOUDENUM" "${kw_args[@]}" --disable-azure --quickscan -l "$cloudenum_raw" \
+            &>/dev/null || "$CLOUDENUM" "${kw_args[@]}" -l "$cloudenum_raw" &>/dev/null || true
+
+        # CloudEnum log lines look like: "OPEN S3 BUCKET: http://name.s3..."
+        if [ -f "$cloudenum_raw" ]; then
+            python3 - "$cloudenum_raw" "$out" "$s3_targets" << 'CEEOF' || true
+import sys, re, json
+raw, out, s3t = sys.argv[1], sys.argv[2], sys.argv[3]
+def provider(line):
+    l = line.lower()
+    if "s3" in l or "aws" in l: return "aws"
+    if "google" in l or "gcp" in l or "storage.googleapis" in l: return "gcp"
+    if "azure" in l or "blob.core" in l or "windows.net" in l: return "azure"
+    return "aws"
+def access(line):
+    l = line.lower()
+    if "open" in l or "public" in l or "listable" in l: return "public"
+    if "protected" in l or "forbidden" in l or "private" in l: return "private"
+    if "exists" in l or "found" in l: return "exists"
+    return "unknown"
+url_rx = re.compile(r'https?://[^\s]+')
+seen = set()
+with open(out, "a") as w, open(s3t, "a") as s:
+    for line in open(raw, errors="ignore"):
+        line = line.strip()
+        if not line:
+            continue
+        m = url_rx.search(line)
+        if not m:
+            continue
+        url = m.group(0).rstrip(".,")
+        # bucket name = host label before .s3 / .storage / .blob
+        host = url.split("//",1)[-1].split("/",1)[0]
+        name = host.split(".")[0]
+        prov = provider(line)
+        acc = access(line)
+        key = (name, prov)
+        if key in seen:
+            continue
+        seen.add(key)
+        w.write(json.dumps({"name": name, "provider": prov, "access": acc,
+                            "url": url, "files": 0,
+                            "note": "cloud_enum: %s" % acc}) + "\n")
+        if prov == "aws":
+            s.write(name + "\n")
+CEEOF
+        fi
+    else
+        log_warn "  CloudEnum not installed ($CLOUDENUM); skipping bucket enumeration"
+    fi
+
+    # S3Scanner: deep anonymous-access check + object listing on AWS candidates.
+    if command -v "$S3SCANNER" &>/dev/null && [ -s "$s3_targets" ]; then
+        log_info "  S3Scanner: checking anonymous access on $(count_lines "$s3_targets") AWS buckets..."
+        local s3_json="$raw_dir/s3scanner_raw.jsonl"
+        "$S3SCANNER" -bucket-file "$s3_targets" -enumerate -json 2>/dev/null > "$s3_json" || \
+            "$S3SCANNER" scan -f "$s3_targets" --json 2>/dev/null > "$s3_json" || true
+        if [ -s "$s3_json" ]; then
+            python3 - "$s3_json" "$out" << 'S3EOF' || true
+import sys, json
+raw, out = sys.argv[1], sys.argv[2]
+rows = []
+for line in open(raw, errors="ignore"):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    name = d.get("name") or d.get("bucket") or d.get("Bucket") or ""
+    if not name:
+        continue
+    perms = d.get("permissions") or d.get("perms") or {}
+    exists = d.get("exists", d.get("found", True))
+    readable = False
+    if isinstance(perms, dict):
+        readable = any("read" in str(k).lower() and v for k, v in perms.items())
+    acc = "public" if readable else ("exists" if exists else "private")
+    files = d.get("num_objects") or d.get("objects") or d.get("files") or 0
+    rows.append({"name": name, "provider": "aws", "access": acc,
+                 "url": "https://%s.s3.amazonaws.com" % name,
+                 "files": files, "note": "s3scanner: %s" % acc})
+# S3Scanner rows override cloud_enum rows for the same bucket (deeper signal).
+with open(out, "a") as w:
+    for r in rows:
+        w.write(json.dumps(r) + "\n")
+S3EOF
+        fi
+    elif [ -s "$s3_targets" ]; then
+        log_warn "  S3Scanner not installed ($S3SCANNER); reporting CloudEnum results only"
+    fi
+
+    log_info "  Bucket enumeration: $(count_lines "$out") storage findings"
+}
+
+# ---------------------------------------------------------------------------
+# Phase 3 — authenticated cloud compliance audit (Prowler / ScoutSuite).
+# This scans the target's cloud ACCOUNT from the inside via cloud APIs and
+# therefore needs the target's own credentials. It is OFF by default and only
+# runs when the operator sets CLOUD_AUDIT_ENABLED=true AND has credentials in
+# the environment (auditing your own estate, or authorized post-compromise).
+# Writes cloud_compliance.jsonl: {tool, check_id, title, service, severity,
+# status, region, resource, framework, remediation}
+# ---------------------------------------------------------------------------
+_cloud_compliance_audit() {
+    local out="$1"
+    : > "$out"
+
+    if [ "$CLOUD_AUDIT_ENABLED" != "true" ]; then
+        log_info "  Compliance audit disabled (CLOUD_AUDIT_ENABLED=false) — external scan"
+        return 0
+    fi
+
+    # Refuse to run without credentials rather than emit a misleading empty audit.
+    local have_creds="false"
+    case "$CLOUD_AUDIT_PROVIDER" in
+        aws)   { [ -n "$AWS_ACCESS_KEY_ID" ] || [ -n "$AWS_PROFILE" ]; } && have_creds="true" ;;
+        gcp)   [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && have_creds="true" ;;
+        azure) { [ -n "$AZURE_CLIENT_ID" ] || [ -n "$AZURE_SUBSCRIPTION_ID" ]; } && have_creds="true" ;;
+    esac
+    if [ "$have_creds" != "true" ]; then
+        log_warn "  CLOUD_AUDIT_ENABLED=true but no $CLOUD_AUDIT_PROVIDER credentials in env; skipping audit"
+        return 0
+    fi
+
+    local raw_dir; raw_dir="$(dirname "$out")"
+    log_warn "  Running AUTHENTICATED compliance audit ($CLOUD_AUDIT_TOOL / $CLOUD_AUDIT_PROVIDER) — ensure you are authorized"
+
+    if [ "$CLOUD_AUDIT_TOOL" = "prowler" ] && command -v "$PROWLER" &>/dev/null; then
+        local prowler_json="$raw_dir/prowler_output.json"
+        "$PROWLER" "$CLOUD_AUDIT_PROVIDER" -M json-ocsf -o "$raw_dir" -F prowler_output \
+            &>/dev/null || "$PROWLER" "$CLOUD_AUDIT_PROVIDER" &>/dev/null || true
+        # Prowler v4 writes prowler_output.ocsf.json; normalize whatever we find.
+        local found; found="$(ls "$raw_dir"/prowler_output*.json 2>/dev/null | head -1)"
+        if [ -n "$found" ]; then
+            python3 - "$found" "$out" << 'PROWEOF' || true
+import sys, json
+raw, out = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(raw, errors="ignore"))
+except Exception:
+    data = []
+if isinstance(data, dict):
+    data = data.get("findings", [])
+sev_map = {"critical":"critical","high":"high","medium":"medium","low":"low",
+           "informational":"info","info":"info"}
+with open(out, "a") as w:
+    for f in data if isinstance(data, list) else []:
+        status = (f.get("status_code") or f.get("status") or "").upper()
+        if status in ("PASS", "MANUAL"):
+            continue
+        sev = str(f.get("severity") or f.get("severity_id") or "medium").lower()
+        finding = f.get("finding_info", {}) if isinstance(f.get("finding_info"), dict) else {}
+        res = f.get("resources", [{}])
+        res0 = res[0] if isinstance(res, list) and res else {}
+        w.write(json.dumps({
+            "tool": "prowler",
+            "check_id": f.get("check_id") or finding.get("uid") or "",
+            "title": f.get("check_title") or finding.get("title") or f.get("message",""),
+            "service": (f.get("service_name") or f.get("cloud",{}).get("provider") or "general"),
+            "severity": sev_map.get(sev, "medium"),
+            "status": status or "FAIL",
+            "region": f.get("region") or res0.get("region",""),
+            "resource": res0.get("name") or res0.get("uid",""),
+            "framework": "CIS",
+            "remediation": (f.get("remediation") or {}).get("desc","") if isinstance(f.get("remediation"),dict) else "",
+        }) + "\n")
+PROWEOF
+        fi
+    elif [ "$CLOUD_AUDIT_TOOL" = "scoutsuite" ] && command -v "$SCOUTSUITE" &>/dev/null; then
+        "$SCOUTSUITE" "$CLOUD_AUDIT_PROVIDER" --report-dir "$raw_dir/scoutsuite" \
+            --no-browser &>/dev/null || true
+        local scout_js; scout_js="$(ls "$raw_dir"/scoutsuite/scoutsuite-results/scoutsuite_results_*.js 2>/dev/null | head -1)"
+        if [ -n "$scout_js" ]; then
+            python3 - "$scout_js" "$out" << 'SCOUTEOF' || true
+import sys, json, re
+raw, out = sys.argv[1], sys.argv[2]
+txt = open(raw, errors="ignore").read()
+txt = re.sub(r'^scoutsuite_results\s*=\s*', '', txt.strip())
+try:
+    data = json.loads(txt)
+except Exception:
+    data = {}
+services = data.get("services", {})
+sev_map = {"danger":"high","warning":"medium","good":"info"}
+with open(out, "a") as w:
+    for svc, sdata in services.items():
+        findings = sdata.get("findings", {})
+        for fid, f in findings.items():
+            flagged = f.get("flagged_items", 0)
+            if not flagged:
+                continue
+            lvl = (f.get("level") or "warning").lower()
+            w.write(json.dumps({
+                "tool": "scoutsuite", "check_id": fid,
+                "title": f.get("description", fid), "service": svc,
+                "severity": sev_map.get(lvl, "medium"), "status": "FAIL",
+                "region": "", "resource": "%d flagged" % flagged,
+                "framework": "ScoutSuite", "remediation": f.get("rationale",""),
+            }) + "\n")
+SCOUTEOF
+        fi
+    else
+        log_warn "  Audit tool '$CLOUD_AUDIT_TOOL' not installed; skipping compliance audit"
+    fi
+
+    log_info "  Compliance audit: $(count_lines "$out") findings"
+}
+
 module_cloud_exposure() {
     local target="$1"
     log_section "MODULE 17: Cloud Attack Surface Exposure"
@@ -2887,6 +3148,8 @@ module_cloud_exposure() {
     local email_file="$base_dir/email_auth.json"
     local origin_file="$base_dir/origin_bypass.jsonl"
     local cred_file="$base_dir/cloud_credentials.jsonl"
+    local buckets_file="$base_dir/cloud_buckets.jsonl"
+    local compliance_file="$base_dir/cloud_compliance.jsonl"
     local findings_file="$base_dir/cloud_findings.jsonl"
     : > "$nuclei_out"; : > "$origin_file"; : > "$cred_file"
 
@@ -2922,13 +3185,23 @@ module_cloud_exposure() {
     log_info "Correlating leaked cloud credentials..."
     _cloud_credentials "$cred_file"
 
-    # 5. Weighted scoring model.
+    # 5. Phase 2 — external cloud storage enumeration (CloudEnum + S3Scanner).
+    log_info "Enumerating public cloud storage (CloudEnum + S3Scanner)..."
+    _cloud_bucket_enum "$target" "$buckets_file"
+
+    # 6. Phase 3 — authenticated compliance audit (off unless creds supplied).
+    log_info "Cloud compliance audit (authenticated)..."
+    _cloud_compliance_audit "$compliance_file"
+
+    # 7. Weighted scoring model.
     log_info "Scoring cloud findings (severity x exploitability x exposure)..."
     python3 - "$MANIFEST_FILE" "$nuclei_out" "$email_file" "$origin_file" "$cred_file" \
-        "$OUTPUT_DIR/14_port_scan/all_ports_list.txt" "$findings_file" "$base_dir/cloud_summary.json" << 'CLOUDSCORE_EOF'
+        "$OUTPUT_DIR/14_port_scan/all_ports_list.txt" "$findings_file" "$base_dir/cloud_summary.json" \
+        "$buckets_file" << 'CLOUDSCORE_EOF'
 import sys, os, json
 
-manifest_file, nuclei_file, email_file, origin_file, cred_file, ports_file, out_file, summary_file = sys.argv[1:9]
+(manifest_file, nuclei_file, email_file, origin_file, cred_file, ports_file,
+ out_file, summary_file, buckets_file) = sys.argv[1:10]
 
 BASE_WEIGHT = {
     "public_cloud_storage": 100, "public_kubernetes_api": 100,
@@ -3166,6 +3439,36 @@ if os.path.exists(cred_file):
             "%s in served asset (%s)" % (det, c.get("redacted", "")),
             exposure_override=(1.0, "public_asset"))
 
+# ---- Phase 2: enumerated storage buckets (CloudEnum + S3Scanner) ----
+# A publicly readable/listable bucket is a confirmed exposure; a bucket that
+# merely exists is recon only and is surfaced in the dashboard recon panel, not
+# scored as a vulnerability here.
+if os.path.exists(buckets_file):
+    bkt_seen = set()
+    for line in open(buckets_file, errors="ignore"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            b = json.loads(line)
+        except Exception:
+            continue
+        name = b.get("name", "")
+        access = (b.get("access") or "unknown").lower()
+        if not name or access not in ("public", "open", "listable"):
+            continue
+        if name in bkt_seen:
+            continue
+        bkt_seen.add(name)
+        files = b.get("files", 0)
+        expl = 1.0 if files else 0.85
+        evidence = "%s bucket '%s' publicly readable" % (b.get("provider", "aws").upper(), name)
+        if files:
+            evidence += " (%s objects listed)" % files
+        add("public_cloud_storage", name, b.get("url", name), expl,
+            b.get("note", "").split(":")[0] or "cloud_enum", "Public storage bucket",
+            evidence, exposure_override=(1.0, "public_internet"))
+
 # ---- missing WAF (control gap; cap to limit noise) ----
 missing_waf = []
 for host, hd in hosts_meta.items():
@@ -3221,7 +3524,11 @@ CLOUDSCORE_EOF
   "module": "cloud_exposure",
   "cloud_findings": $total,
   "nuclei_findings": $(count_lines "$nuclei_out"),
+  "buckets_enumerated": $(count_lines "$buckets_file"),
+  "compliance_findings": $(count_lines "$compliance_file"),
   "findings_file": "cloud_findings.jsonl",
+  "buckets_file": "cloud_buckets.jsonl",
+  "compliance_file": "cloud_compliance.jsonl",
   "summary_file": "cloud_summary.json",
   "duration_seconds": $((end_time - start_time))
 }

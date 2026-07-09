@@ -131,8 +131,39 @@ install_python_deps() {
     pip_install requests urllib3 python-dateutil pytz beautifulsoup4 lxml
     pip_install colorama tqdm rich PyYAML python-dotenv validators
     pip_install scapy dirsearch
-    
+
+    # Cloud recon + audit tooling (Module 17).
+    # s3scanner: anonymous S3/GCS/Azure access checks (Phase 2).
+    # prowler / scoutsuite: authenticated compliance audit (Phase 3, opt-in).
+    pip_install s3scanner || log_warn "s3scanner install failed (cloud bucket enum degraded)"
+    pip_install prowler || log_warn "prowler install failed (cloud compliance audit unavailable)"
+    pip_install scoutsuite || log_warn "scoutsuite install failed (multi-cloud audit unavailable)"
+
     log_info "Python dependencies installed"
+}
+
+# Install cloud_enum (Phase 2 bucket enumeration — Python, not on PyPI).
+install_cloud_enum() {
+    log_info "Installing cloud_enum (AWS/GCP/Azure storage enumeration)..."
+    local ce_dir="$HOME/recon/cloud_enum"
+    if [ ! -d "$ce_dir" ]; then
+        git clone --quiet https://github.com/initstring/cloud_enum.git "$ce_dir" 2>/dev/null \
+            || { log_warn "cloud_enum clone failed; Phase 2 bucket enum will be skipped"; return; }
+    fi
+    # Its own deps.
+    if pip3 install --help 2>&1 | grep -q "break-system-packages"; then
+        pip3 install --break-system-packages -r "$ce_dir/requirements.txt" 2>/dev/null || true
+    else
+        pip3 install -r "$ce_dir/requirements.txt" 2>/dev/null || true
+    fi
+    # Expose a `cloud_enum` command on PATH pointing at the script.
+    local bindir="$HOME/go/bin"; mkdir -p "$bindir"
+    cat > "$bindir/cloud_enum" << EOF
+#!/usr/bin/env bash
+exec python3 "$ce_dir/cloud_enum.py" "\$@"
+EOF
+    chmod +x "$bindir/cloud_enum"
+    log_info "cloud_enum installed ($bindir/cloud_enum)"
 }
 
 # Install Go tools
@@ -289,6 +320,7 @@ main() {
     install_security_tools
     install_python_deps
     install_go_tools
+    install_cloud_enum
     setup_directories
     setup_haktrails_config
     finalize_setup

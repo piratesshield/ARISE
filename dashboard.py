@@ -48,6 +48,33 @@ PORT_RISK_TIER2 = {3306, 5432, 1433}                      # MySQL, Postgres, MSS
 PORT_RISK_TIER3 = {3389, 22, 23, 445, 21, 25, 110, 143}  # RDP, SSH, Telnet, SMB, FTP, SMTP, POP, IMAP
 SENSITIVE_PORTS = PORT_RISK_TIER1 | PORT_RISK_TIER2 | PORT_RISK_TIER3
 
+# Cloud tab taxonomy — the Cloud dashboard shows ONLY these. Anything the
+# pipeline classified into an app/API bucket (XSS, SQLi, SSRF, IDOR, JWT, …)
+# never reaches here; the whitelist is the hard boundary between the Cloud tab
+# and the Vulns/API tabs.
+CLOUD_SECURITY_CATEGORIES = {
+    'public_cloud_storage', 'public_kubernetes_api', 'metadata_service_exposure',
+    'leaked_cloud_credentials', 'terraform_state_exposed', 'public_elasticsearch',
+    'public_cicd', 'public_redis_mongo', 'grafana_prometheus_exposed',
+    'cdn_origin_bypass', 'debug_endpoint',
+}
+# Control-gap posture findings — cloud/infra hygiene, shown in a separate group.
+CLOUD_POSTURE_CATEGORIES = {'missing_waf', 'missing_email_auth', 'information_disclosure'}
+CLOUD_ALL_CATEGORIES = CLOUD_SECURITY_CATEGORIES | CLOUD_POSTURE_CATEGORIES
+
+# Provider fingerprints for cloud recon — maps httpx `tech`/CDN strings and IP
+# owners to a canonical provider so the recon panel can inventory the estate.
+CLOUD_PROVIDER_TECH = {
+    'aws': ['amazon web services', 'amazon cloudfront', 'amazon s3', 'amazon elb',
+            'aws', 'cloudfront', 's3', 'elastic load balancing', 'awselb'],
+    'gcp': ['google cloud', 'google-cloud', 'gcs', 'google storage', 'firebase',
+            'app engine', 'cloud run', 'googleusercontent'],
+    'azure': ['azure', 'microsoft azure', 'azure blob', 'azure cdn', 'windows-azure'],
+    'cloudflare': ['cloudflare'],
+    'fastly': ['fastly'],
+    'akamai': ['akamai'],
+}
+
 
 def setup_logging():
     """Configure a central rotating log for the dashboard."""
@@ -1246,25 +1273,194 @@ def api_risk(scan_id):
     })
 
 
+def _classify_provider(*blobs):
+    """Map httpx tech / CDN / server strings to a canonical cloud provider."""
+    text = ' '.join(str(b or '') for b in blobs).lower()
+    for provider, needles in CLOUD_PROVIDER_TECH.items():
+        if any(n in text for n in needles):
+            return provider
+    return None
+
+
+def build_cloud_recon(scan_id):
+    """Cloud-estate inventory derived from HTTP discovery + bucket enumeration.
+
+    This is recon, not vulnerabilities: which providers/CDNs front the estate,
+    which origin IPs sit exposed, and which storage buckets were discovered.
+    """
+    recon = {
+        'providers': {}, 'cdn_breakdown': {}, 'origin_ips': [],
+        'buckets': [], 'cloud_hosts': 0, 'total_hosts': 0,
+        'bucket_summary': {'total': 0, 'public': 0, 'private': 0},
+    }
+    if not scan_id:
+        return recon
+
+    scan_root = os.path.join(BASE_SCAN_DIR, scan_id)
+    http_file = os.path.join(scan_root, '04_http_discovery/http_confirmed.json')
+    seen_hosts = set()
+    origin_seen = set()
+
+    if os.path.exists(http_file):
+        try:
+            with open(http_file, 'r', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except Exception:
+                        continue
+                    host = e.get('input') or e.get('host')
+                    if not host or host in seen_hosts:
+                        continue
+                    seen_hosts.add(host)
+                    recon['total_hosts'] += 1
+
+                    tech = e.get('tech', []) or []
+                    cdn_name = e.get('cdn_name') or ''
+                    provider = _classify_provider(' '.join(tech), cdn_name,
+                                                  e.get('webserver', ''))
+                    if provider:
+                        recon['cloud_hosts'] += 1
+                        recon['providers'][provider] = recon['providers'].get(provider, 0) + 1
+
+                    # CDN inventory
+                    if e.get('cdn') and cdn_name:
+                        label = cdn_name.title()
+                        recon['cdn_breakdown'][label] = recon['cdn_breakdown'].get(label, 0) + 1
+
+                    # Exposed origins: a resolved host that is NOT behind a CDN
+                    # but sits on a cloud provider is a direct-origin candidate.
+                    ip = e.get('host_ip') or (e.get('a') or [''])[0]
+                    if ip and not e.get('cdn') and provider and ip not in origin_seen:
+                        origin_seen.add(ip)
+                        recon['origin_ips'].append({
+                            'host': host, 'ip': ip, 'provider': provider,
+                            'cdn': False, 'server': e.get('webserver', ''),
+                        })
+        except Exception as exc:
+            logger.error("Failed to build cloud recon from %s: %s", http_file, exc)
+
+    # Phase 2 — bucket enumeration output (CloudEnum + S3Scanner)
+    buckets_file = os.path.join(scan_root, '17_cloud_exposure/cloud_buckets.jsonl')
+    if os.path.exists(buckets_file):
+        try:
+            with open(buckets_file, 'r', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        b = json.loads(line)
+                    except Exception:
+                        continue
+                    access = (b.get('access') or 'unknown').lower()
+                    recon['buckets'].append({
+                        'name': b.get('name', ''),
+                        'provider': (b.get('provider') or 'aws').lower(),
+                        'access': access,
+                        'url': b.get('url', ''),
+                        'files': b.get('files', 0),
+                        'note': b.get('note', ''),
+                    })
+                    recon['bucket_summary']['total'] += 1
+                    if access in ('public', 'open', 'listable'):
+                        recon['bucket_summary']['public'] += 1
+                    else:
+                        recon['bucket_summary']['private'] += 1
+        except Exception as exc:
+            logger.error("Failed to read cloud buckets %s: %s", buckets_file, exc)
+
+    recon['origin_ips'] = recon['origin_ips'][:50]
+    recon['buckets'].sort(key=lambda x: (x['access'] != 'public', x['name']))
+    return recon
+
+
+def load_cloud_compliance(scan_id):
+    """Phase 3 — authenticated compliance audit (Prowler / ScoutSuite).
+
+    Only present when the operator ran an authenticated audit with cloud
+    credentials. Absent (enabled=False) for pure external scans.
+    """
+    result = {'enabled': False, 'findings': [], 'by_service': {},
+              'by_severity': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0},
+              'tool': None, 'total': 0}
+    if not scan_id:
+        return result
+    comp_file = os.path.join(BASE_SCAN_DIR, scan_id, '17_cloud_exposure/cloud_compliance.jsonl')
+    if not os.path.exists(comp_file):
+        return result
+    try:
+        with open(comp_file, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    c = json.loads(line)
+                except Exception:
+                    continue
+                result['enabled'] = True
+                sev = (c.get('severity') or 'info').lower()
+                svc = c.get('service', 'general')
+                result['tool'] = result['tool'] or c.get('tool')
+                result['findings'].append({
+                    'check_id': c.get('check_id', ''),
+                    'title': c.get('title', ''),
+                    'service': svc,
+                    'severity': sev,
+                    'status': c.get('status', 'FAIL'),
+                    'region': c.get('region', ''),
+                    'resource': c.get('resource', ''),
+                    'framework': c.get('framework', ''),
+                    'remediation': c.get('remediation', ''),
+                })
+                result['by_service'][svc] = result['by_service'].get(svc, 0) + 1
+                if sev in result['by_severity']:
+                    result['by_severity'][sev] += 1
+    except Exception as exc:
+        logger.error("Failed to read cloud compliance %s: %s", comp_file, exc)
+    result['findings'].sort(key=lambda x: {'critical': 0, 'high': 1, 'medium': 2,
+                                           'low': 3, 'info': 4}.get(x['severity'], 5))
+    result['total'] = len(result['findings'])
+    return result
+
+
 @app.route('/api/scan/<scan_id>/cloud')
 def api_cloud(scan_id):
-    """Cloud attack surface findings scored by the weighted model."""
+    """Cloud attack surface — infrastructure security findings + cloud recon.
+
+    Strictly cloud-scoped: app/API vulnerabilities (XSS, SQLi, SSRF, IDOR, JWT)
+    are excluded by the CLOUD_ALL_CATEGORIES whitelist and live in the Vulns/API
+    tabs instead.
+    """
     data = get_cached_scan_data(scan_id)
     if not data:
         return jsonify({}), 404
 
-    cloud = [v for v in data.get('vulnerabilities', []) if v.get('source') == 'Cloud Exposure']
+    cloud = [v for v in data.get('vulnerabilities', [])
+             if v.get('source') == 'Cloud Exposure'
+             and v.get('cloud_category') in CLOUD_ALL_CATEGORIES]
     cloud.sort(key=lambda v: v.get('weighted_score', 0), reverse=True)
 
     by_category = {}
     sev_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+    security_count = 0
+    posture_count = 0
     for v in cloud:
         cat = v.get('cloud_category', 'unknown')
+        if cat in CLOUD_SECURITY_CATEGORIES:
+            security_count += 1
+        else:
+            posture_count += 1
         entry = by_category.setdefault(cat, {
             'label': v.get('template', cat),
             'base_weight': v.get('base_weight', 0),
             'count': 0,
             'max_score': 0,
+            'group': 'security' if cat in CLOUD_SECURITY_CATEGORIES else 'posture',
         })
         entry['count'] += 1
         entry['max_score'] = max(entry['max_score'], v.get('weighted_score', 0))
@@ -1274,9 +1470,13 @@ def api_cloud(scan_id):
     categories = sorted(by_category.values(), key=lambda c: c['max_score'], reverse=True)
     return jsonify({
         'total': len(cloud),
+        'security_count': security_count,
+        'posture_count': posture_count,
         'by_severity': sev_counts,
         'categories': categories,
         'findings': cloud,
+        'recon': build_cloud_recon(scan_id),
+        'compliance': load_cloud_compliance(scan_id),
     })
 
 
@@ -1488,7 +1688,12 @@ def api_cloud_legacy():
     scan_id = resolve_target(request.args.get('target'))
     logger.info("API request: /api/cloud target=%s", scan_id)
     if not scan_id:
-        return jsonify({'total': 0, 'by_severity': {}, 'categories': [], 'findings': []})
+        return jsonify({
+            'total': 0, 'security_count': 0, 'posture_count': 0,
+            'by_severity': {}, 'categories': [], 'findings': [],
+            'recon': build_cloud_recon(None),
+            'compliance': load_cloud_compliance(None),
+        })
     return api_cloud(scan_id)
 
 
@@ -1823,7 +2028,7 @@ def api_techstack():
         technologies.append({
             'name': name,
             'count': count,
-            'hosts': len(tech_hosts.get(name, set())),
+            'hosts': sorted(list(tech_hosts.get(name, set()))),
             'category': cat,
         })
         by_category.setdefault(cat, {'label': CAT_LABELS.get(cat, cat.title()), 'count': 0, 'techs': []})
