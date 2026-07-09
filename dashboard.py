@@ -463,6 +463,38 @@ class ScanDataPipeline:
             except Exception as exc:
                 logger.error("Failed to read cloud findings %s: %s", cloud_file, exc)
 
+        # Extended verification findings (Module 19) — dedicated safe-mode
+        # scanners that confirm SSRF/CRLF/JWT/SSTI/GraphQL/smuggling.
+        ext_file = os.path.join(self.scan_dir, '19_extended_checks/extended_findings.jsonl')
+        if os.path.exists(ext_file):
+            try:
+                with open(ext_file, 'r', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+                        vulns.append({
+                            'source': 'Extended Verification',
+                            'template': entry.get('template', 'Extended finding'),
+                            'severity': entry.get('severity', 'info'),
+                            'host': entry.get('host', 'Unknown'),
+                            'url': entry.get('url', ''),
+                            'impact': entry.get('evidence', ''),
+                            'remediation': entry.get('remediation', ''),
+                            'check': entry.get('check'),
+                            'detection_tool': entry.get('tool'),
+                            'confidence': entry.get('confidence'),
+                            'verification': entry.get('verification'),
+                            'parameter': entry.get('parameter', ''),
+                            'safe_mode': entry.get('safe_mode', True),
+                        })
+            except Exception as exc:
+                logger.error("Failed to read extended findings %s: %s", ext_file, exc)
+
         # Deduplicate vulnerabilities to prevent double publishing
         unique_vulns = []
         seen = set()
@@ -1206,6 +1238,7 @@ def api_modules(scan_id):
         '15_sqli_testing': 'SQLi Testing',
         '16_api_security': 'API Security Testing',
         '17_cloud_exposure': 'Cloud Exposure',
+        '19_extended_checks': 'Extended Verification',
     }
 
     for module_dir, module_name in module_names.items():
@@ -2102,6 +2135,7 @@ def api_modules_legacy():
         '15_sqli_testing': 'SQLi Testing',
         '16_api_security': 'API Security Testing',
         '17_cloud_exposure': 'Cloud Exposure',
+        '19_extended_checks': 'Extended Verification',
     }
 
     modules = {}

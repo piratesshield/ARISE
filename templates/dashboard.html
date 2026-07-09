@@ -291,6 +291,13 @@
     .provider-akamai { background:rgba(0,153,204,.12); color:#0099cc; }
     .provider-unknown { background:var(--surface-2); color:var(--text-dim); }
 
+    /* Extended-verification confidence badges */
+    .conf-badge { display:inline-block; padding:1px 7px; border-radius:5px; font-size:10px; font-weight:700;
+        text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; margin-left:4px; }
+    .conf-confirmed { background:rgba(52,211,153,.16); color:#34d399; }
+    .conf-probable { background:rgba(255,196,61,.16); color:var(--med); }
+    .conf-info { background:var(--surface-2); color:var(--text-dim); }
+
     /* Cloud section labels + recon */
     .section-label { display:flex; align-items:center; gap:9px; font-size:13px; font-weight:700;
         letter-spacing:.3px; color:var(--text); text-transform:uppercase; margin-bottom:14px; }
@@ -950,11 +957,18 @@ function renderVulns() {
     document.getElementById('vulnsBody').innerHTML = rows.map(v => `
         <tr class="clickable" onclick="openHost('${attr(v.host)}')">
             <td><span class="badge ${sevClass(v.severity)}">${esc(v.severity)}</span></td>
-            <td><b>${esc(v.template)}</b>${v.cve_id?` <span class="pill">${esc(v.cve_id)}</span>`:''}</td>
+            <td><b>${esc(v.template)}</b>${v.cve_id?` <span class="pill">${esc(v.cve_id)}</span>`:''}${confidenceBadge(v)}</td>
             <td><span class="host-link">${esc(v.host||'—')}</span></td>
             <td style="color:var(--text-dim)">${esc(v.source||'')}</td>
             <td class="leaf-url">${esc((v.url||'').slice(0,70))}</td>
         </tr>`).join('') || `<tr><td colspan="5"><div class="empty"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><br>No vulnerabilities detected in this scan.</div></td></tr>`;
+}
+function confidenceBadge(v) {
+    if (!v.confidence) return '';
+    const map = {confirmed:['Confirmed','conf-confirmed'], probable:['Probable','conf-probable'], informational:['Info','conf-info']};
+    const [label, cls] = map[v.confidence] || [v.confidence, 'conf-info'];
+    const verif = v.verification ? ` title="verified via ${esc(v.verification)}"` : '';
+    return ` <span class="conf-badge ${cls}"${verif}>${label}</span>`;
 }
 
 /* ---- Ports + Service Fingerprinting ---- */

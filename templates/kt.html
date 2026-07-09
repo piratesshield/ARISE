@@ -68,6 +68,7 @@ tr:hover td { background:var(--surface-2); }
         <a href="#risk-model">4. Risk Scoring Model</a>
         <a href="#cloud">5. Cloud Exposure Detection</a>
         <a href="#api-security">6. API Security Testing</a>
+        <a href="#extended">6b. Extended Verification (safe mode)</a>
         <a href="#dashboard">7. Dashboard & API Endpoints</a>
         <a href="#operations">8. Operations & CLI</a>
         <a href="#tuning">9. Tuning & Configuration</a>
@@ -117,6 +118,7 @@ tr:hover td { background:var(--surface-2); }
             <tr><td>15</td><td>LFI Testing</td><td>Custom</td><td>Local File Inclusion path traversal checks</td><td>LFI confirmations</td></tr>
             <tr><td>16</td><td>API Security</td><td>autoswagger, RESTler</td><td>Swagger discovery + REST API fuzzing + robustness testing</td><td>API findings, bug buckets</td></tr>
             <tr><td>17</td><td>Cloud Exposure</td><td>nuclei (custom templates)</td><td>AWS/GCP/Azure misconfiguration detection with weighted scoring</td><td>cloud_findings.jsonl</td></tr>
+            <tr><td>19</td><td>Extended Verification</td><td>interactsh, crlfuzz, jwt_tool, SSTImap, graphw00f, smuggler</td><td>Production-safe confirmation of SSRF/CRLF/JWT/SSTI/GraphQL/smuggling — confirm, never exploit</td><td>extended_findings.jsonl</td></tr>
             <tr><td>18</td><td>Reporting</td><td>Custom</td><td>Aggregate all results, compute final risk scores</td><td>Final manifest.json</td></tr>
         </tbody>
     </table>
@@ -169,6 +171,15 @@ tr:hover td { background:var(--surface-2); }
                 <tr><td><code>s3scanner</code></td><td>Anonymous S3/GCS/Azure access + object listing (Phase 2)</td></tr>
                 <tr><td><code>prowler</code></td><td>Authenticated CIS/PCI/HIPAA audit (Phase 3, opt-in)</td></tr>
                 <tr><td><code>scoutsuite</code></td><td>Authenticated multi-cloud audit (Phase 3, opt-in)</td></tr>
+            </table>
+            <h3>Extended Verification (Module 19)</h3>
+            <table>
+                <tr><td><code>interactsh</code></td><td>OOB oracle — confirms blind SSRF via callback</td></tr>
+                <tr><td><code>crlfuzz</code></td><td>CRLF header-injection detection</td></tr>
+                <tr><td><code>jwt_tool</code></td><td>JWT weakness — offline secret cracking, alg:none</td></tr>
+                <tr><td><code>SSTImap</code></td><td>Template injection detection (15+ engines)</td></tr>
+                <tr><td><code>graphw00f</code></td><td>GraphQL fingerprint + introspection check</td></tr>
+                <tr><td><code>smuggler</code></td><td>HTTP request smuggling (gated off by default)</td></tr>
             </table>
             <h3>Platform</h3>
             <table>
@@ -275,6 +286,30 @@ tr:hover td { background:var(--surface-2); }
             <li>Parses results from <code>runSummary.json</code> and <code>errorBuckets.json</code> (JSON primary, text fallback)</li>
             <li>Supports auth via <code>APISEC_AUTH_TOKEN_CMD</code> and <code>APISEC_AUTH_REFRESH_SEC</code> env vars</li>
         </ul>
+    </div>
+
+    <h2 id="extended">6b. Extended Verification (Module 19)</h2>
+    <p>Dedicated FOSS scanners confirm vulnerability classes nuclei structurally can't reach. The module is <b>production-safe by contract</b>: it <b>confirms</b> findings, it never <b>exploits</b> them.</p>
+    <div class="card">
+        <h3>Safe-mode contract (EXTENDED_SAFE_MODE=true)</h3>
+        <ul>
+            <li>No shells, no data exfiltration, no auth-bypass actions, no state mutation</li>
+            <li>GET / read-only requests, benign payloads, rate-limited, URL-capped</li>
+            <li>Confirmation comes from OOB callbacks, response reflection, or offline analysis — never weaponization</li>
+        </ul>
+        <h3>Per-check verification method</h3>
+        <table>
+            <thead><tr><th>Check</th><th>Tool</th><th>How it confirms (safely)</th><th>Confidence</th></tr></thead>
+            <tbody>
+                <tr><td>Blind SSRF</td><td>interactsh</td><td>Injects an OOB URL into SSRF-sink params; a DNS/HTTP callback proves the server made an outbound request. Nothing internal is read.</td><td>Confirmed</td></tr>
+                <tr><td>CRLF</td><td>crlfuzz</td><td>Detects CR/LF reflected into response headers. No XSS/cache-poison chaining.</td><td>Confirmed</td></tr>
+                <tr><td>JWT</td><td>jwt_tool</td><td><b>100% offline.</b> Tokens harvested from responses/JS are decoded and cracked locally against a wordlist. Zero requests sent — no auth bypass possible.</td><td>Confirmed</td></tr>
+                <tr><td>SSTI</td><td>SSTImap</td><td>Arithmetic marker payloads (<code>{{7*7}}</code>) identify a vulnerable engine. Never <code>--os-shell</code>/<code>-X</code>.</td><td>Probable</td></tr>
+                <tr><td>GraphQL</td><td>graphw00f</td><td>Read-only engine fingerprint + introspection state on discovered <code>/graphql</code> endpoints.</td><td>Informational</td></tr>
+                <tr><td>HTTP smuggling</td><td>smuggler</td><td><b>Gated off by default.</b> Desync probes can disturb other users' production traffic — opt-in via <code>CHECK_SMUGGLING=true</code>.</td><td>Probable</td></tr>
+            </tbody>
+        </table>
+        <p style="font-size:13px;color:var(--text-secondary)">Findings land in the <b>Vulns</b> tab with source <code>Extended Verification</code> and a confidence badge (Confirmed / Probable / Info). Output: <code>19_extended_checks/extended_findings.jsonl</code>.</p>
     </div>
 
     <h2 id="dashboard">7. Dashboard & API Endpoints</h2>

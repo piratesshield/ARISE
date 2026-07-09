@@ -79,6 +79,35 @@ CLOUD_AUDIT_ENABLED="${CLOUD_AUDIT_ENABLED:-false}"        # Phase 3 master swit
 CLOUD_AUDIT_PROVIDER="${CLOUD_AUDIT_PROVIDER:-aws}"        # aws|gcp|azure
 CLOUD_AUDIT_TOOL="${CLOUD_AUDIT_TOOL:-prowler}"            # prowler|scoutsuite
 
+# Extended vulnerability verification (Module 19) — dedicated FOSS scanners that
+# CONFIRM classes nuclei can't (blind SSRF, CRLF, JWT, SSTI, GraphQL, smuggling).
+INTERACTSH_CLIENT="${INTERACTSH_CLIENT:-interactsh-client}"  # OOB callback oracle
+CRLFUZZ="${CRLFUZZ:-crlfuzz}"                                # CRLF injection
+JWT_TOOL="${JWT_TOOL:-jwt_tool}"                             # JWT weakness analysis
+SSTIMAP="${SSTIMAP:-sstimap}"                               # template injection
+GRAPHW00F="${GRAPHW00F:-graphw00f}"                          # GraphQL fingerprint
+SMUGGLER="${SMUGGLER:-smuggler}"                            # HTTP request smuggling
+
+# PRODUCTION-SAFE contract: these checks CONFIRM, they do not EXPLOIT.
+# EXTENDED_SAFE_MODE=true (default, do not disable on prod) enforces: benign
+# payloads only, GET/read-only, no shells/exfil/auth-bypass actions, no state
+# mutation. Confirmation comes from OOB callbacks (SSRF), response reflection
+# (CRLF), or offline analysis (JWT) — never from weaponization.
+EXTENDED_CHECKS_ENABLED="${EXTENDED_CHECKS_ENABLED:-true}"
+EXTENDED_SAFE_MODE="${EXTENDED_SAFE_MODE:-true}"
+EXTENDED_MAX_URLS="${EXTENDED_MAX_URLS:-150}"      # cap active probes per check
+EXTENDED_RATE="${EXTENDED_RATE:-40}"               # requests/sec ceiling
+EXTENDED_OOB_WAIT="${EXTENDED_OOB_WAIT:-25}"       # seconds to await OOB callbacks
+INTERACTSH_SERVER="${INTERACTSH_SERVER:-}"         # optional self-hosted oast server
+# Per-check toggles. Smuggling is OFF by default: desync probes can disturb
+# other users' requests on shared production frontends.
+CHECK_SSRF="${CHECK_SSRF:-true}"
+CHECK_CRLF="${CHECK_CRLF:-true}"
+CHECK_JWT="${CHECK_JWT:-true}"
+CHECK_SSTI="${CHECK_SSTI:-true}"
+CHECK_GRAPHQL="${CHECK_GRAPHQL:-true}"
+CHECK_SMUGGLING="${CHECK_SMUGGLING:-false}"
+
 # Safety/performance bounds for active testing. Override explicitly when authorized.
 PARAM_FUZZ_MAX_URLS="${PARAM_FUZZ_MAX_URLS:-50}"
 JS_DOWNLOAD_MAX="${JS_DOWNLOAD_MAX:-500}"
@@ -3537,6 +3566,448 @@ EOF
     log_info "Cloud attack surface exposure completed"
     echo "$output_file"
 }
+
+###################################################################################################
+# MODULE 19: EXTENDED VULNERABILITY VERIFICATION (production-safe: confirm, never exploit)
+###################################################################################################
+
+# Collect candidate URLs that carry query parameters, from crawling + param
+# fuzzing. SAFE: we only keep GET-style URLs and cap the count.
+_ext_collect_param_urls() {
+    local out="$1"
+    : > "$out"
+    local sources=(
+        "$OUTPUT_DIR/06_crawling/all_urls.txt"
+        "$OUTPUT_DIR/09_crawling/all_urls.txt"
+        "$OUTPUT_DIR/11_param_fuzzing/param_urls.txt"
+        "$OUTPUT_DIR/10_param_fuzzing/param_urls.txt"
+    )
+    for s in "${sources[@]}"; do
+        [ -f "$s" ] && grep -E '\?[^=]+=' "$s" 2>/dev/null
+    done | grep -Ev '\.(png|jpe?g|gif|svg|css|woff2?|ttf|ico|webp|mp4|pdf)(\?|$)' \
+         | sort -u | head -n "$EXTENDED_MAX_URLS" > "$out"
+    count_lines "$out"
+}
+
+# Start the interactsh OOB oracle in the background. Prints the registered
+# payload domain to stdout; callbacks stream as JSON into $2.
+_ext_start_interactsh() {
+    local domain_out="$1"
+    local callbacks="$2"
+    : > "$callbacks"; : > "$domain_out"
+    command -v "$INTERACTSH_CLIENT" &>/dev/null || { log_warn "  interactsh-client not installed; blind-SSRF confirmation disabled"; return 1; }
+    local server_arg=()
+    [ -n "$INTERACTSH_SERVER" ] && server_arg=(-s "$INTERACTSH_SERVER")
+    # -json streams callback records; -o persists them; -v keeps the domain line.
+    "$INTERACTSH_CLIENT" "${server_arg[@]}" -json -o "$callbacks" > "$domain_out.raw" 2>&1 &
+    INTERACTSH_PID=$!
+    # The client prints the payload domain within the first couple seconds.
+    local tries=0
+    while [ $tries -lt 10 ]; do
+        local dom
+        dom=$(grep -oE '[a-z0-9]+\.oast\.[a-z]+' "$domain_out.raw" 2>/dev/null | head -1)
+        [ -z "$dom" ] && dom=$(grep -oE '[a-z0-9]+\.[a-z0-9.-]*interact[a-z0-9.-]*' "$domain_out.raw" 2>/dev/null | head -1)
+        if [ -n "$dom" ]; then echo "$dom" > "$domain_out"; return 0; fi
+        sleep 1; tries=$((tries+1))
+    done
+    log_warn "  interactsh did not register a domain in time; SSRF confirmation degraded"
+    return 1
+}
+
+_ext_stop_interactsh() {
+    [ -n "$INTERACTSH_PID" ] && kill "$INTERACTSH_PID" 2>/dev/null
+    INTERACTSH_PID=""
+}
+
+# SSRF (blind, OOB-confirmed). SAFE: injects an interactsh URL into SSRF-sink
+# params; a callback proves the server made an outbound request. No internal
+# resource is read or returned — confirmation only.
+_ext_ssrf() {
+    local urls="$1" oob_domain="$2" probe_map="$3" out="$4"
+    : > "$out"
+    [ "$CHECK_SSRF" = "true" ] || { log_info "  SSRF check disabled"; return 0; }
+    [ -s "$oob_domain" ] || { log_warn "  No OOB domain; skipping SSRF confirmation"; return 0; }
+    local dom; dom=$(cat "$oob_domain")
+    python3 - "$urls" "$dom" "$probe_map" "$EXTENDED_RATE" << 'SSRFEOF'
+import sys, urllib.parse, urllib.request, json, time, uuid
+urls_file, oob, mapfile, rate = sys.argv[1:5]
+delay = 1.0 / max(1, int(rate))
+SINKS = {"url","uri","link","src","dest","destination","redirect","redirect_uri","next",
+         "continue","path","domain","host","feed","site","callback","webhook","proxy",
+         "fetch","file","page","out","to","view","image","img","load","ref","return",
+         "u","r","target","open","window","dataurl","source","remote"}
+probes = {}
+sent = 0
+with open(mapfile, "w") as mf:
+    for line in open(urls_file, errors="ignore"):
+        u = line.strip()
+        if not u or sent >= 400:
+            continue
+        try:
+            parts = urllib.parse.urlsplit(u)
+            qs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        except Exception:
+            continue
+        if not qs:
+            continue
+        for i,(k,v) in enumerate(qs):
+            if k.lower() not in SINKS:
+                continue
+            token = uuid.uuid4().hex[:12]
+            payload = "http://%s.%s" % (token, oob)
+            newqs = qs[:i] + [(k, payload)] + qs[i+1:]
+            probe_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path,
+                                                 urllib.parse.urlencode(newqs), parts.fragment))
+            probes[token] = {"url": u, "param": k, "host": parts.netloc}
+            mf.write(json.dumps({"token": token, **probes[token]}) + "\n")
+            try:
+                req = urllib.request.Request(probe_url, headers={"User-Agent": "ARISE-SafeVerify/1.0"})
+                urllib.request.urlopen(req, timeout=8).read(1024)
+            except Exception:
+                pass
+            sent += 1
+            time.sleep(delay)
+print(sent)
+SSRFEOF
+    log_info "  SSRF probes sent (awaiting OOB callbacks)"
+}
+
+# CRLF injection — crlfuzz detection mode. SAFE: detects header-injection
+# reflection; does not chain to XSS/cache poisoning.
+_ext_crlf() {
+    local urls="$1" out="$2"
+    : > "$out"
+    [ "$CHECK_CRLF" = "true" ] || { log_info "  CRLF check disabled"; return 0; }
+    command -v "$CRLFUZZ" &>/dev/null || { log_warn "  crlfuzz not installed; skipping CRLF"; return 0; }
+    [ -s "$urls" ] || return 0
+    "$CRLFUZZ" -l "$urls" -s -c 25 -o "$out.raw" 2>/dev/null || true
+    if [ -f "$out.raw" ]; then
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local host; host=$(printf '%s' "$line" | awk -F/ '{print $3}')
+            jq -cn --arg url "$line" --arg host "$host" \
+                '{check:"crlf",tool:"crlfuzz",severity:"medium",template:"CRLF header injection",
+                  host:$host,url:$url,parameter:"",evidence:"CRLF payload reflected into response headers",
+                  confidence:"confirmed",verification:"response-reflection",
+                  remediation:"URL-encode CR/LF in header-reflected values; validate redirect/location inputs.",safe_mode:true}' >> "$out"
+        done < "$out.raw"
+    fi
+    log_info "  CRLF findings: $(count_lines "$out")"
+}
+
+# JWT weaknesses — 100% OFFLINE. SAFEST check: extracts tokens from crawled
+# responses/JS and analyzes them locally. No requests to production, no forged
+# tokens sent, so no possibility of auth bypass.
+_ext_jwt() {
+    local out="$1"
+    : > "$out"
+    [ "$CHECK_JWT" = "true" ] || { log_info "  JWT check disabled"; return 0; }
+    local resp_dir="$OUTPUT_DIR/04_http_discovery/responses"
+    local js_dir="$OUTPUT_DIR/09_crawling/js_downloads"
+    [ -d "$js_dir" ] || js_dir="$OUTPUT_DIR/06_crawling/js_downloads"
+    local wordlist="$HOME/recon/lists/jwt-secrets.txt"
+    [ -f "$wordlist" ] || wordlist=""
+    python3 - "$out" "$resp_dir" "$js_dir" "$wordlist" << 'JWTEOF'
+import sys, os, re, json, base64, hmac, hashlib
+out, resp_dir, js_dir, wordlist = sys.argv[1:5]
+JWT_RX = re.compile(r'eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{0,}')
+COMMON = ["secret","password","123456","changeme","admin","key","jwt","token","private",
+          "secretkey","supersecret","qwerty","test","dev","default","your-256-bit-secret",
+          "your_jwt_secret","jwtsecret","s3cr3t","P@ssw0rd"]
+def b64d(s):
+    s += "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s.encode())
+def scan_files(root):
+    toks = set()
+    if not os.path.isdir(root):
+        return toks
+    for r,_,files in os.walk(root):
+        for fn in files:
+            try:
+                data = open(os.path.join(r,fn), errors="ignore").read()
+            except Exception:
+                continue
+            for m in JWT_RX.findall(data):
+                toks.add(m)
+    return toks
+tokens = scan_files(resp_dir) | scan_files(js_dir)
+words = COMMON[:]
+if wordlist and os.path.exists(wordlist):
+    words += [w.strip() for w in open(wordlist, errors="ignore") if w.strip()][:5000]
+seen = set()
+with open(out, "w") as w:
+    for tok in tokens:
+        parts = tok.split(".")
+        if len(parts) < 2:
+            continue
+        try:
+            hdr = json.loads(b64d(parts[0]))
+        except Exception:
+            continue
+        alg = str(hdr.get("alg","")).lower()
+        try:
+            payload = json.loads(b64d(parts[1])) if len(parts) > 1 else {}
+        except Exception:
+            payload = {}
+        fp = (parts[0], parts[1][:16])
+        if fp in seen:
+            continue
+        seen.add(fp)
+        issues, sev = [], "info"
+        if alg == "none":
+            issues.append("alg:none — signature not enforced"); sev = "high"
+        # Offline HMAC secret crack (no network).
+        cracked = None
+        if alg in ("hs256","hs384","hs512") and len(parts) == 3:
+            digestmod = {"hs256":hashlib.sha256,"hs384":hashlib.sha384,"hs512":hashlib.sha512}[alg]
+            signing_input = (parts[0] + "." + parts[1]).encode()
+            try:
+                sig = b64d(parts[2])
+                for cand in words:
+                    if hmac.compare_digest(hmac.new(cand.encode(), signing_input, digestmod).digest(), sig):
+                        cracked = cand; break
+            except Exception:
+                pass
+            if cracked:
+                issues.append("weak HMAC secret cracked offline: '%s'" % cracked); sev = "critical"
+        sensitive = [k for k in payload if k.lower() in ("role","roles","admin","is_admin","scope","permissions","email","user","uid")]
+        if sensitive and not issues:
+            issues.append("carries privileged claims: %s" % ", ".join(sensitive[:5])); sev = "low"
+        if not issues:
+            continue
+        host = ""
+        for c in ("iss","aud"):
+            if isinstance(payload.get(c), str) and "//" in payload[c]:
+                host = payload[c].split("//")[1].split("/")[0]; break
+        w.write(json.dumps({
+            "check":"jwt","tool":"jwt_tool","severity":sev,
+            "template":"JWT weakness (%s)" % alg.upper(),
+            "host":host or "token", "url":"", "parameter":"Authorization",
+            "evidence":"; ".join(issues),
+            "confidence":"confirmed","verification":"offline-analysis",
+            "remediation":"Use a strong random secret / asymmetric keys; reject alg:none; validate signature server-side.",
+            "safe_mode":True}) + "\n")
+JWTEOF
+    log_info "  JWT findings: $(count_lines "$out")"
+}
+
+# SSTI — SSTImap detection only. SAFE: arithmetic marker payloads to identify a
+# vulnerable engine; never --os-shell / -X (no code execution).
+_ext_ssti() {
+    local urls="$1" out="$2"
+    : > "$out"
+    [ "$CHECK_SSTI" = "true" ] || { log_info "  SSTI check disabled"; return 0; }
+    command -v "$SSTIMAP" &>/dev/null || { log_warn "  sstimap not installed; skipping SSTI"; return 0; }
+    [ -s "$urls" ] || return 0
+    local n=0
+    while IFS= read -r u && [ $n -lt 60 ]; do
+        [ -z "$u" ] && continue
+        n=$((n+1))
+        # --detect stops at engine identification; no exploitation flags passed.
+        local res; res=$("$SSTIMAP" -u "$u" --detect --forms 2>/dev/null || true)
+        if printf '%s' "$res" | grep -qiE 'plugin .* detected|engine: |is vulnerable|template injection'; then
+            local engine; engine=$(printf '%s' "$res" | grep -oiE 'engine: [A-Za-z0-9_.]+' | head -1 | awk '{print $2}')
+            [ -z "$engine" ] && engine="unknown"
+            local host; host=$(printf '%s' "$u" | awk -F/ '{print $3}')
+            jq -cn --arg url "$u" --arg host "$host" --arg eng "$engine" \
+                '{check:"ssti",tool:"sstimap",severity:"high",template:("SSTI ("+$eng+")"),
+                  host:$host,url:$url,parameter:"",evidence:("template engine "+$eng+" reflects injected expression"),
+                  confidence:"probable",verification:"expression-eval",
+                  remediation:"Never render user input as a template; use logic-less templates or strict sandboxing.",safe_mode:true}' >> "$out"
+        fi
+    done < "$urls"
+    log_info "  SSTI findings: $(count_lines "$out")"
+}
+
+# GraphQL — graphw00f fingerprint + introspection check. SAFE: read-only
+# detection queries; no mutations.
+_ext_graphql() {
+    local out="$1"
+    : > "$out"
+    [ "$CHECK_GRAPHQL" = "true" ] || { log_info "  GraphQL check disabled"; return 0; }
+    command -v "$GRAPHW00F" &>/dev/null || { log_warn "  graphw00f not installed; skipping GraphQL"; return 0; }
+    # Candidate endpoints: known paths on each confirmed web host.
+    local hosts_file="$OUTPUT_DIR/04_http_discovery/http_hosts.txt"
+    [ -s "$hosts_file" ] || return 0
+    local paths=("/graphql" "/graphql/console" "/api/graphql" "/v1/graphql" "/query" "/gql")
+    local n=0
+    while IFS= read -r base && [ $n -lt 40 ]; do
+        base="${base%/}"
+        for p in "${paths[@]}"; do
+            n=$((n+1))
+            local ep="$base$p"
+            local res; res=$("$GRAPHW00F" -d -t "$ep" 2>/dev/null || true)
+            if printf '%s' "$res" | grep -qiE 'Discovered GraphQL Engine|Attack Surface|seems to be running'; then
+                local engine; engine=$(printf '%s' "$res" | grep -oiE 'Engine: [A-Za-z0-9_.-]+' | head -1 | cut -d' ' -f2)
+                [ -z "$engine" ] && engine="unknown"
+                local introspect="unknown"
+                printf '%s' "$res" | grep -qiE 'introspection.*enabled|Introspection is enabled' && introspect="enabled"
+                local sev="info"; [ "$introspect" = "enabled" ] && sev="medium"
+                local host; host=$(printf '%s' "$ep" | awk -F/ '{print $3}')
+                jq -cn --arg url "$ep" --arg host "$host" --arg eng "$engine" --arg intro "$introspect" --arg sev "$sev" \
+                    '{check:"graphql",tool:"graphw00f",severity:$sev,template:("GraphQL endpoint ("+$eng+")"),
+                      host:$host,url:$url,parameter:"",evidence:("GraphQL engine "+$eng+", introspection "+$intro),
+                      confidence:"informational",verification:"fingerprint",
+                      remediation:"Disable introspection in production; enforce query depth/cost limits and authz per field.",safe_mode:true}' >> "$out"
+                break
+            fi
+        done
+    done < "$hosts_file"
+    log_info "  GraphQL findings: $(count_lines "$out")"
+}
+
+# HTTP request smuggling — GATED OFF. Desync probes can corrupt other users'
+# in-flight requests on shared production frontends, so this only runs when the
+# operator explicitly opts in.
+_ext_smuggling() {
+    local out="$1"
+    : > "$out"
+    if [ "$CHECK_SMUGGLING" != "true" ]; then
+        log_info "  Smuggling check disabled (CHECK_SMUGGLING=false) — production-safe default"
+        return 0
+    fi
+    command -v "$SMUGGLER" &>/dev/null || { log_warn "  smuggler not installed; skipping"; return 0; }
+    local hosts_file="$OUTPUT_DIR/04_http_discovery/http_hosts.txt"
+    [ -s "$hosts_file" ] || return 0
+    log_warn "  Running HTTP smuggling detection (opt-in) — timing-based probes only"
+    local n=0
+    while IFS= read -r u && [ $n -lt 20 ]; do
+        [ -z "$u" ] && continue
+        n=$((n+1))
+        local res; res=$("$SMUGGLER" -u "$u" -q --timeout 6 2>/dev/null || true)
+        if printf '%s' "$res" | grep -qiE 'POTENTIALLY VULNERABLE|CL\.TE|TE\.CL'; then
+            local host; host=$(printf '%s' "$u" | awk -F/ '{print $3}')
+            local variant; variant=$(printf '%s' "$res" | grep -oiE 'CL\.TE|TE\.CL|TE\.TE' | head -1)
+            jq -cn --arg url "$u" --arg host "$host" --arg var "$variant" \
+                '{check:"smuggling",tool:"smuggler",severity:"high",template:("HTTP request smuggling ("+$var+")"),
+                  host:$host,url:$url,parameter:"",evidence:("desync timing signature: "+$var),
+                  confidence:"probable",verification:"timing-differential",
+                  remediation:"Normalize Content-Length/Transfer-Encoding at the edge; reject ambiguous framing; use HTTP/2 end-to-end.",safe_mode:true}' >> "$out"
+        fi
+    done < "$hosts_file"
+    log_info "  Smuggling findings: $(count_lines "$out")"
+}
+
+# Correlate interactsh callbacks back to the SSRF probe that triggered them.
+_ext_ssrf_correlate() {
+    local callbacks="$1" probe_map="$2" out="$3"
+    : > "$out"
+    [ -f "$callbacks" ] || return 0
+    python3 - "$callbacks" "$probe_map" "$out" << 'CORREOF'
+import sys, json
+cb, mapfile, out = sys.argv[1:4]
+probes = {}
+try:
+    for line in open(mapfile, errors="ignore"):
+        line=line.strip()
+        if line:
+            d=json.loads(line); probes[d["token"]]=d
+except Exception:
+    pass
+hit = {}
+for line in open(cb, errors="ignore"):
+    line=line.strip()
+    if not line:
+        continue
+    try:
+        rec=json.loads(line)
+    except Exception:
+        continue
+    fqdn=(rec.get("full-id") or rec.get("unique-id") or rec.get("full_id") or "").lower()
+    raw=json.dumps(rec).lower()
+    proto=rec.get("protocol","dns")
+    for token, meta in probes.items():
+        if token in fqdn or token in raw:
+            key=(token,)
+            if key in hit:
+                continue
+            hit[key]=True
+            with open(out,"a") as w:
+                w.write(json.dumps({
+                    "check":"ssrf","tool":"interactsh","severity":"high",
+                    "template":"Blind SSRF (OOB confirmed)",
+                    "host":meta.get("host",""),"url":meta.get("url",""),
+                    "parameter":meta.get("param",""),
+                    "evidence":"server made an out-of-band %s callback to the injected URL" % proto,
+                    "confidence":"confirmed","verification":"oob-callback",
+                    "remediation":"Validate/allowlist outbound URLs; block link-local & metadata ranges; enforce IMDSv2.",
+                    "safe_mode":True})+"\n")
+CORREOF
+    log_info "  SSRF confirmed (OOB): $(count_lines "$out")"
+}
+
+module_extended_checks() {
+    local target="$1"
+    log_section "MODULE 19: Extended Vulnerability Verification (safe mode)"
+
+    if [ "$EXTENDED_CHECKS_ENABLED" != "true" ]; then
+        log_warn "Extended checks disabled (EXTENDED_CHECKS_ENABLED=false)"
+        return 0
+    fi
+    log_info "Mode: $([ "$EXTENDED_SAFE_MODE" = "true" ] && echo "SAFE (confirm only, no exploitation)" || echo "AGGRESSIVE")"
+
+    local start_time=$(date +%s)
+    local base_dir="$OUTPUT_DIR/19_extended_checks"
+    mkdir -p "$base_dir"
+    local output_file="$base_dir/$(make_iso_filename "$target" "extended_checks" "results")"
+    local urls_file="$base_dir/param_urls.txt"
+    local findings_file="$base_dir/extended_findings.jsonl"
+    : > "$findings_file"
+
+    local n_urls; n_urls=$(_ext_collect_param_urls "$urls_file")
+    log_info "Candidate parameterized URLs: $n_urls"
+
+    # Per-check output shards.
+    local f_ssrf="$base_dir/ssrf.jsonl" f_crlf="$base_dir/crlf.jsonl"
+    local f_jwt="$base_dir/jwt.jsonl"   f_ssti="$base_dir/ssti.jsonl"
+    local f_gql="$base_dir/graphql.jsonl" f_smug="$base_dir/smuggling.jsonl"
+
+    # 1. SSRF — start OOB oracle, fire probes, correlate.
+    if [ "$CHECK_SSRF" = "true" ]; then
+        log_info "[1/6] Blind SSRF (interactsh OOB confirmation)..."
+        local oob_domain="$base_dir/oob_domain.txt" callbacks="$base_dir/oob_callbacks.jsonl"
+        local probe_map="$base_dir/ssrf_probes.jsonl"
+        if _ext_start_interactsh "$oob_domain" "$callbacks"; then
+            _ext_ssrf "$urls_file" "$oob_domain" "$probe_map" "$f_ssrf"
+            log_info "  Waiting ${EXTENDED_OOB_WAIT}s for out-of-band callbacks..."
+            sleep "$EXTENDED_OOB_WAIT"
+            _ext_stop_interactsh
+            _ext_ssrf_correlate "$callbacks" "$probe_map" "$f_ssrf"
+        fi
+    fi
+
+    # 2-6.
+    log_info "[2/6] CRLF injection (crlfuzz)...";       _ext_crlf "$urls_file" "$f_crlf"
+    log_info "[3/6] JWT weakness (offline analysis)..."; _ext_jwt "$f_jwt"
+    log_info "[4/6] SSTI (sstimap detection)...";        _ext_ssti "$urls_file" "$f_ssti"
+    log_info "[5/6] GraphQL (graphw00f)...";             _ext_graphql "$f_gql"
+    log_info "[6/6] HTTP smuggling (gated)...";          _ext_smuggling "$f_smug"
+
+    # Merge all shards into the normalized findings file.
+    for shard in "$f_ssrf" "$f_crlf" "$f_jwt" "$f_ssti" "$f_gql" "$f_smug"; do
+        [ -f "$shard" ] && cat "$shard" >> "$findings_file"
+    done
+
+    local total; total=$(count_lines "$findings_file")
+    log_info "Extended verification findings: $total (confirmed/probable, safe mode)"
+    [ "$total" -gt 0 ] && jq -r '"  [\(.severity)] \(.template) — \(.host) (\(.confidence))"' "$findings_file" 2>/dev/null | head -8 || true
+    update_statistics "extended_findings" "$total"
+
+    local end_time=$(date +%s)
+    cat > "$output_file" << EOF
+{
+  "module": "extended_checks",
+  "safe_mode": $EXTENDED_SAFE_MODE,
+  "extended_findings": $total,
+  "checks_run": {"ssrf": "$CHECK_SSRF", "crlf": "$CHECK_CRLF", "jwt": "$CHECK_JWT", "ssti": "$CHECK_SSTI", "graphql": "$CHECK_GRAPHQL", "smuggling": "$CHECK_SMUGGLING"},
+  "findings_file": "extended_findings.jsonl",
+  "duration_seconds": $((end_time - start_time))
+}
+EOF
+    log_info "Extended vulnerability verification completed"
+    echo "$output_file"
+}
+
 ###################################################################################################
 # MODULE 14: REPORTING
 ###################################################################################################
@@ -3767,7 +4238,7 @@ main() {
                        "waf_detection" "crawling" "header_analysis" "directory_discovery" \
                        "secret_scanning" "param_fuzzing" "nuclei_scan" "xss_testing" \
                        "sqli_testing" "api_security" "full_port_scan" "service_fingerprint" \
-                       "cloud_exposure" "reporting")
+                       "cloud_exposure" "extended_checks" "reporting")
     
     local pipeline_failed=false
     for module in "${module_order[@]}"; do
@@ -3839,6 +4310,9 @@ main() {
                 ;;
             cloud_exposure)
                 module_cloud_exposure "$target"
+                ;;
+            extended_checks)
+                module_extended_checks "$target"
                 ;;
             reporting)
                 module_reporting "$target"

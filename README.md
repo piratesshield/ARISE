@@ -65,6 +65,16 @@ ARISE is a professional-grade, state-driven **External Attack Surface Monitoring
 | [Prowler](https://github.com/prowler-cloud/prowler) | Authenticated CIS/PCI/HIPAA compliance audit (Phase 3, opt-in) |
 | [ScoutSuite](https://github.com/nccgroup/ScoutSuite) | Authenticated multi-cloud security audit (Phase 3, opt-in) |
 
+### Extended Verification (production-safe)
+| Tool | Purpose |
+|------|---------|
+| [interactsh](https://github.com/projectdiscovery/interactsh) | OOB callback oracle — confirms blind SSRF without reading internal data |
+| [crlfuzz](https://github.com/dwisiswant0/crlfuzz) | CRLF injection detection (header-reflection) |
+| [jwt_tool](https://github.com/ticarpi/jwt_tool) | JWT weakness analysis — offline secret cracking, alg:none, weak claims |
+| [SSTImap](https://github.com/vladimirbutuzov/SSTImap) | Template injection detection (15+ engines, detection-only) |
+| [graphw00f](https://github.com/dolevf/graphw00f) | GraphQL engine fingerprint + introspection check |
+| [smuggler](https://github.com/defparam/smuggler) | HTTP request smuggling detection (gated off by default) |
+
 ### Platform
 | Component | Purpose |
 |-----------|---------|
@@ -95,6 +105,7 @@ ARISE is a professional-grade, state-driven **External Attack Surface Monitoring
 | 15 | LFI Testing | Local File Inclusion path traversal checks |
 | 16 | API Security | Swagger discovery + REST API fuzzing (autoswagger, RESTler) |
 | 17 | Cloud Exposure | AWS/GCP/Azure misconfiguration detection with weighted scoring |
+| 19 | Extended Verification | Production-safe confirmation of SSRF/CRLF/JWT/SSTI/GraphQL/smuggling (interactsh, crlfuzz, jwt_tool, SSTImap, graphw00f, smuggler) |
 | 18 | Reporting | Aggregate results, compute final risk scores |
 
 ---
@@ -185,6 +196,23 @@ python3 arise.py --env NAABU_RATE=5000        # Port scan rate limit
 | `CLOUD_AUDIT_ENABLED` | `false` | Phase 3 — authenticated compliance audit (needs cloud creds) |
 | `CLOUD_AUDIT_PROVIDER` | `aws` | Phase 3 provider: `aws` \| `gcp` \| `azure` |
 | `CLOUD_AUDIT_TOOL` | `prowler` | Phase 3 engine: `prowler` \| `scoutsuite` |
+| `EXTENDED_CHECKS_ENABLED` | `true` | Module 19 — extended vulnerability verification |
+| `EXTENDED_SAFE_MODE` | `true` | Confirm-only, never exploit (keep on for production) |
+| `CHECK_SMUGGLING` | `false` | HTTP smuggling detection — off by default (desync risk to prod) |
+| `EXTENDED_MAX_URLS` | `150` | Cap on active probes per check |
+| `INTERACTSH_SERVER` | (empty) | Optional self-hosted interactsh server |
+
+### Extended Verification (Module 19)
+
+Dedicated FOSS scanners that **confirm** vulnerability classes nuclei can't — but **never exploit** them. Safe for production:
+
+- **Confirm, don't exploit** — no shells, no data exfil, no auth-bypass actions, no state mutation
+- **Blind SSRF** proven via out-of-band callback (interactsh) — the server just pings our listener; nothing internal is read
+- **JWT** analysis is **100% offline** — tokens harvested from responses are cracked locally, zero requests sent
+- **SSTI** uses arithmetic markers (`{{7*7}}`) for detection only, never `--os-shell`
+- **CRLF/GraphQL** are read-only detections; **HTTP smuggling** is gated off by default (desync probes can disturb other users' production traffic)
+
+Findings appear in the **Vulns** tab with a confidence badge (Confirmed / Probable / Info) and the verification method.
 
 ### Cloud dashboard (cloud-only)
 

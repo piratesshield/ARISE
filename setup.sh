@@ -194,8 +194,50 @@ install_go_tools() {
     go install -v github.com/trufflesecurity/trufflehog/v3/cmd/trufflehog@latest 2>/dev/null || log_warn "trufflehog install failed"
     go install -v github.com/dwisiswant0/bhedak@latest 2>/dev/null || log_warn "bhedak install failed"
     go install -v github.com/hahwul/dalfox/v2@latest 2>/dev/null || log_warn "dalfox install failed"
-    
+
+    # Extended verification (Module 19) — Go tools.
+    go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest 2>/dev/null || log_warn "interactsh-client install failed (blind-SSRF confirmation)"
+    go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest 2>/dev/null || log_warn "crlfuzz install failed"
+
     log_info "Go tools installation attempted"
+}
+
+# Install extended-verification Python/git tools (Module 19).
+install_extended_tools() {
+    log_info "Installing extended verification tools (jwt_tool, SSTImap, graphw00f, smuggler)..."
+    local rdir="$HOME/recon"; mkdir -p "$rdir"
+    local bindir="$HOME/go/bin"; mkdir -p "$bindir"
+
+    _clone_wrap() {  # repo_url  dir_name  entry_script  cmd_name
+        local url="$1" dir="$2" entry="$3" cmd="$4"
+        [ -d "$rdir/$dir" ] || git clone --quiet "$url" "$rdir/$dir" 2>/dev/null || { log_warn "$cmd clone failed"; return; }
+        if [ -f "$rdir/$dir/requirements.txt" ]; then
+            if pip3 install --help 2>&1 | grep -q "break-system-packages"; then
+                pip3 install --break-system-packages -r "$rdir/$dir/requirements.txt" 2>/dev/null || true
+            else
+                pip3 install -r "$rdir/$dir/requirements.txt" 2>/dev/null || true
+            fi
+        fi
+        cat > "$bindir/$cmd" << EOF
+#!/usr/bin/env bash
+exec python3 "$rdir/$dir/$entry" "\$@"
+EOF
+        chmod +x "$bindir/$cmd"
+        log_info "  $cmd installed"
+    }
+
+    _clone_wrap https://github.com/ticarpi/jwt_tool.git jwt_tool jwt_tool.py jwt_tool
+    _clone_wrap https://github.com/vladimirbutuzov/SSTImap.git SSTImap sstimap.py sstimap
+    _clone_wrap https://github.com/dolevf/graphw00f.git graphw00f main.py graphw00f
+    _clone_wrap https://github.com/defparam/smuggler.git smuggler smuggler.py smuggler
+
+    # A small JWT weak-secret wordlist for offline cracking.
+    if [ ! -f "$rdir/lists/jwt-secrets.txt" ]; then
+        mkdir -p "$rdir/lists"
+        curl -fsSL https://raw.githubusercontent.com/wallarm/jwt-secrets/master/jwt.secrets.list \
+            -o "$rdir/lists/jwt-secrets.txt" 2>/dev/null || log_warn "jwt-secrets wordlist download failed"
+    fi
+    log_info "Extended verification tools installed"
 }
 
 # Setup directories and wordlists
@@ -321,6 +363,7 @@ main() {
     install_python_deps
     install_go_tools
     install_cloud_enum
+    install_extended_tools
     setup_directories
     setup_haktrails_config
     finalize_setup
