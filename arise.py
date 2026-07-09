@@ -94,12 +94,18 @@ def start_dashboard(port: int, env: dict):
     dash_env.update(env)
     dash_env["ARISE_DASHBOARD_PORT"] = str(port)
 
-    log(f"Launching dashboard on http://localhost:{port} ...")
+    LOG_DIR.mkdir(exist_ok=True)
+    dash_log = LOG_DIR / "dashboard.log"
+    log(f"Launching dashboard on http://localhost:{port} ... (logs: {dash_log})")
+    dash_log_fh = open(dash_log, "a")
     proc = subprocess.Popen(
         [sys.executable, str(DASHBOARD_SCRIPT)],
         cwd=str(SCRIPT_DIR),
         env=dash_env,
+        stdout=dash_log_fh,
+        stderr=dash_log_fh,
     )
+    proc._dash_log_fh = dash_log_fh
     # Give Flask a moment to bind before scans start hammering the filesystem.
     time.sleep(2)
     if proc.poll() is not None:
@@ -118,6 +124,9 @@ def stop_dashboard(proc):
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+    fh = getattr(proc, '_dash_log_fh', None)
+    if fh:
+        fh.close()
     log("Dashboard stopped")
 
 

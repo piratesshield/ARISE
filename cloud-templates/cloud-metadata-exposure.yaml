@@ -1,0 +1,61 @@
+id: arise-cloud-metadata-exposure
+
+info:
+  name: Cloud Instance Metadata Service Reachable via Proxy/SSRF
+  author: arise
+  severity: critical
+  description: >
+    Detects an exposed reverse proxy or open forwarder that relays requests to
+    the link-local cloud metadata endpoint (169.254.169.254 / metadata.google.
+    internal). A reachable metadata service leaks temporary IAM credentials and
+    instance identity, enabling cloud account compromise.
+  reference:
+    - https://hackingthe.cloud/aws/exploitation/ec2-metadata-ssrf/
+    - https://cloud.google.com/compute/docs/metadata/overview
+  classification:
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N
+    cvss-score: 9.1
+    cwe-id: CWE-918
+  metadata:
+    arise-category: metadata_service_exposure
+    arise-weight: 100
+  tags: arise,cloud,ssrf,metadata,aws,gcp,azure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/latest/meta-data/"
+      - "{{BaseURL}}/latest/meta-data/iam/security-credentials/"
+      - "{{BaseURL}}/computeMetadata/v1/instance/"
+      - "{{BaseURL}}/metadata/instance?api-version=2021-02-01"
+
+    headers:
+      Metadata: "true"
+      Metadata-Flavor: "Google"
+
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          - "ami-id"
+          - "instance-id"
+          - "iam/security-credentials"
+          - "AccessKeyId"
+          - "computeMetadata"
+          - "\"compute\""
+          - "\"network\""
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        name: access_key
+        group: 1
+        regex:
+          - "\"AccessKeyId\"\\s*:\\s*\"([A-Z0-9]+)\""

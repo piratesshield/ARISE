@@ -1,0 +1,68 @@
+id: arise-debug-endpoints
+
+info:
+  name: Exposed Application Debug / Introspection Endpoint
+  author: arise
+  severity: medium
+  description: >
+    Detects unauthenticated debug, profiling, or introspection endpoints
+    (Spring Boot Actuator, Werkzeug/Flask debugger, Django debug, PHP info,
+    Node inspector). These leak configuration, environment variables, and in
+    some cases allow remote code execution.
+  reference:
+    - https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html
+  classification:
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N
+    cvss-score: 7.5
+    cwe-id: CWE-489
+  metadata:
+    arise-category: debug_endpoint
+    arise-weight: 20
+  tags: arise,cloud,exposure,debug,misconfig
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/env"
+      - "{{BaseURL}}/actuator/heapdump"
+      - "{{BaseURL}}/actuator"
+      - "{{BaseURL}}/debug/vars"
+      - "{{BaseURL}}/phpinfo.php"
+      - "{{BaseURL}}/__debug__/"
+      - "{{BaseURL}}/console"
+
+    stop-at-first-match: true
+    matchers-condition: or
+    matchers:
+      - type: word
+        name: spring-actuator
+        part: body
+        words:
+          - '"activeProfiles"'
+          - '"propertySources"'
+          - '_links'
+        condition: or
+
+      - type: word
+        name: go-expvar
+        part: body
+        words:
+          - '"cmdline"'
+          - '"memstats"'
+        condition: and
+
+      - type: word
+        name: phpinfo
+        part: body
+        words:
+          - "PHP Version"
+          - "php.ini"
+        condition: and
+
+      - type: word
+        name: werkzeug-console
+        part: body
+        words:
+          - "Werkzeug Debugger"
+          - "console-secret"
+        condition: or

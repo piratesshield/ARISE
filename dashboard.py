@@ -39,8 +39,14 @@ PORT_MAPPINGS = {
     5984: 'CouchDB', 6379: 'Redis', 8080: 'HTTP-Alt', 8443: 'HTTPS-Alt',
     9200: 'Elasticsearch', 27017: 'MongoDB'
 }
-SENSITIVE_PORTS = {22, 21, 23, 25, 445, 1433, 3306, 3389, 5432, 5984, 6379, 9200, 27017}
 SEVERITY_WEIGHTS = {'critical': 40, 'high': 20, 'medium': 8, 'low': 2, 'info': 0}
+
+# Ports grouped by blast radius: unauthenticated data stores and remote-shell
+# services are tier-1; management protocols and legacy services are tier-2.
+PORT_RISK_TIER1 = {6379, 9200, 27017, 5984, 11211}       # Redis, Elastic, Mongo, Couch, Memcached
+PORT_RISK_TIER2 = {3306, 5432, 1433}                      # MySQL, Postgres, MSSQL
+PORT_RISK_TIER3 = {3389, 22, 23, 445, 21, 25, 110, 143}  # RDP, SSH, Telnet, SMB, FTP, SMTP, POP, IMAP
+SENSITIVE_PORTS = PORT_RISK_TIER1 | PORT_RISK_TIER2 | PORT_RISK_TIER3
 
 
 def setup_logging():
@@ -338,6 +344,98 @@ class ScanDataPipeline:
                             continue
             except Exception as exc:
                 logger.error("Failed to read secrets %s: %s", secrets_file, exc)
+        # SQL injection results
+        sqli_file = os.path.join(self.scan_dir, '15_sqli_testing/sqli_results.jsonl')
+        if os.path.exists(sqli_file):
+            try:
+                with open(sqli_file, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            confidence = entry.get('confidence', 'medium')
+                            sqli_type = entry.get('type', 'unknown')
+                            param = entry.get('parameter', 'unknown')
+                            waf = entry.get('waf_vendor', '')
+                            detection_pass = entry.get('detection_pass', 'baseline')
+                            severity_map = {'high': 'critical', 'medium': 'high', 'low': 'medium'}
+                            severity = severity_map.get(confidence, 'high')
+                            waf_note = f' [behind {waf}]' if waf else ''
+                            pass_note = f' via {detection_pass}' if detection_pass != 'baseline' else ''
+                            vulns.append({
+                                'source': 'SQLi Testing',
+                                'template': f'SQL Injection ({sqli_type})',
+                                'severity': severity,
+                                'host': entry.get('host', 'Unknown'),
+                                'url': entry.get('url', ''),
+                                'impact': f'SQLi on param: {param} (type: {sqli_type}, confidence: {confidence}{waf_note}{pass_note})',
+                                'remediation': 'Use parameterized queries / prepared statements; never concatenate user input into SQL',
+                                'confidence': confidence,
+                            })
+                        except Exception:
+                            continue
+            except Exception as exc:
+                logger.error("Failed to read SQLi results %s: %s", sqli_file, exc)
+
+        # LFI / parameter fuzzing results
+        lfi_file = os.path.join(self.scan_dir, '11_param_fuzzing/lfi_results.json')
+        if os.path.exists(lfi_file):
+            try:
+                with open(lfi_file, 'r') as f:
+                    lfi_results = json.load(f)
+                for entry in lfi_results:
+                    fuzz_url = entry.get('url', '')
+                    host = 'Unknown'
+                    if fuzz_url.startswith('http'):
+                        try:
+                            host = fuzz_url.split('//')[1].split('/')[0].split(':')[0]
+                        except Exception:
+                            pass
+                    payload = entry.get('input', {}).get('FUZZ', '')
+                    vulns.append({
+                        'source': 'Param Fuzzing',
+                        'template': 'Local File Inclusion (LFI)',
+                        'severity': 'critical',
+                        'host': host,
+                        'url': fuzz_url,
+                        'impact': f'LFI confirmed with payload: {payload}',
+                        'remediation': 'Sanitize file path parameters; use allowlists instead of direct file access'
+                    })
+            except Exception as exc:
+                logger.error("Failed to read LFI results %s: %s", lfi_file, exc)
+
+        # Cloud attack surface exposure findings (weighted model)
+        cloud_file = os.path.join(self.scan_dir, '17_cloud_exposure/cloud_findings.jsonl')
+        if os.path.exists(cloud_file):
+            try:
+                with open(cloud_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+                        label = entry.get('category_label', entry.get('cloud_category', 'Cloud Exposure'))
+                        vulns.append({
+                            'source': 'Cloud Exposure',
+                            'template': label,
+                            'severity': entry.get('severity', 'info'),
+                            'host': entry.get('host', 'Unknown'),
+                            'url': entry.get('url', ''),
+                            'impact': entry.get('evidence', ''),
+                            'remediation': entry.get('remediation', ''),
+                            'cloud_category': entry.get('cloud_category'),
+                            'base_weight': entry.get('base_weight'),
+                            'exploitability': entry.get('exploitability'),
+                            'exposure': entry.get('exposure'),
+                            'exposure_note': entry.get('exposure_note'),
+                            'weighted_score': entry.get('weighted_score'),
+                            'detection_tool': entry.get('tool'),
+                        })
+            except Exception as exc:
+                logger.error("Failed to read cloud findings %s: %s", cloud_file, exc)
+
         # Deduplicate vulnerabilities to prevent double publishing
         unique_vulns = []
         seen = set()
@@ -382,7 +480,7 @@ class ScanDataPipeline:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
-                        host = entry.get('host')
+                        host = entry.get('input') or entry.get('host')
                         status = entry.get('status_code')
                         if host and status:
                             result[host] = int(status)
@@ -427,45 +525,151 @@ class ScanDataPipeline:
 # ===========================================================================
 
 def compute_host_risk(host, host_data, host_vulns):
-    """Compute a 0-100 risk score for a single host."""
-    score = 0
+    """Compute a 0-100 host risk score across six weighted domains.
 
-    # Vulnerability severity (capped at 80 total from vulns alone)
-    vuln_score = 0
-    for v in host_vulns:
-        vuln_score += SEVERITY_WEIGHTS.get(v.get('severity', 'info'), 0)
-    score += min(vuln_score, 80)
+    Domains (raw caps; total clamped to 100):
+      Vulnerability Exposure  35 — confirmed CVEs, nuclei findings, XSS
+      Credential / Secret     25 — leaked keys, tokens, passwords in JS/repos
+      Infrastructure Posture  20 — exposed ports, missing WAF, weak headers, cookies
+      SSL / Domain Integrity  10 — dangling certs, missing SSL
+      Attack Surface Breadth  10 — port count, service diversity, no-CDN exposure
+      Cloud Exposure          40 — weighted cloud findings (base x exploitability x exposure)
 
-    # Exposed secrets (+25 each, capped at 50)
-    secret_score = sum(25 for v in host_vulns if v.get('source') == 'Secret Scan')
-    score += min(secret_score, 50)
-
-    # Sensitive non-HTTP services exposed
-    open_ports = set(host_data.get('ports_open', []))
-    sensitive_exposed = open_ports & SENSITIVE_PORTS
-    score += min(len(sensitive_exposed) * 15, 45)
-
-    # Missing WAF while internet-facing
+    The cloud domain is additive and can drive a single host to critical on its
+    own (e.g. a public bucket or leaked cloud credential), reflecting the blast
+    radius of cloud-native exposures.
+    """
     has_http = bool(host_data.get('http_status'))
-    waf_vendor = host_data.get('waf_vendor', 'none')
-    has_waf = waf_vendor not in ('none', '', None)
-    if has_http and not has_waf:
-        score += 10
-
-    # Low security-header score
+    waf_vendor = (host_data.get('waf_vendor') or '').lower()
+    has_waf = waf_vendor not in ('none', '')
+    open_ports = set(int(p) for p in host_data.get('ports_open', []))
     header_score = host_data.get('security_header_score', 0)
-    if has_http and header_score < 3:
-        score += 5
 
-    return max(0, min(score, 100))
+    # ── Domain 1: Vulnerability Exposure (0-35) ──
+    vuln_domain = 0.0
+    non_secret_vulns = [v for v in host_vulns if v.get('source') not in ('Secret Scan', 'SQLi Testing', 'Cloud Exposure')]
+    sqli_hits = [v for v in host_vulns if v.get('source') == 'SQLi Testing']
+    if non_secret_vulns or sqli_hits:
+        raw = 0
+        for v in non_secret_vulns:
+            raw += SEVERITY_WEIGHTS.get(v.get('severity', 'info'), 0)
+        # Confirmed SQLi = direct DB access; weight higher than generic nuclei finding
+        for v in sqli_hits:
+            confidence = v.get('confidence', 'medium')
+            raw += 50 if confidence == 'high' else 30
+        vuln_domain = min(raw / 80.0, 1.0) * 35
+
+    # ── Domain 2: Credential / Secret / Data Access Exposure (0-25) ──
+    secret_domain = 0.0
+    secrets = [v for v in host_vulns if v.get('source') == 'Secret Scan']
+    lfi_hits = [v for v in host_vulns if v.get('source') == 'Param Fuzzing']
+    if secrets or lfi_hits or sqli_hits:
+        secret_raw = 0.0
+        # First secret is catastrophic (70%), each additional adds diminishing impact
+        if secrets:
+            secret_raw = 0.7 + min(len(secrets) - 1, 5) * 0.06
+        # LFI = file read primitive, nearly as severe
+        if lfi_hits:
+            secret_raw = max(secret_raw, 0.5) + min(len(lfi_hits), 3) * 0.1
+        # SQLi = potential full DB dump; high-confidence SQLi is near-secret severity
+        if sqli_hits:
+            high_conf = sum(1 for v in sqli_hits if v.get('confidence') == 'high')
+            med_conf = len(sqli_hits) - high_conf
+            sqli_raw = high_conf * 0.6 + med_conf * 0.3
+            secret_raw = max(secret_raw, 0.0) + min(sqli_raw, 0.8)
+        secret_domain = min(secret_raw, 1.0) * 25
+
+    # ── Domain 3: Infrastructure Posture (0-20) ──
+    posture_domain = 0.0
+    posture_deductions = 0.0
+
+    # Exposed data stores (tier 1) — direct unauthenticated access risk
+    tier1_exposed = open_ports & PORT_RISK_TIER1
+    posture_deductions += len(tier1_exposed) * 0.20
+
+    # Exposed databases (tier 2) — auth-gated but still shouldn't be public
+    tier2_exposed = open_ports & PORT_RISK_TIER2
+    posture_deductions += len(tier2_exposed) * 0.12
+
+    # Exposed management/legacy (tier 3)
+    tier3_exposed = open_ports & PORT_RISK_TIER3
+    posture_deductions += len(tier3_exposed) * 0.06
+
+    # Missing WAF on an internet-facing web app
+    if has_http and not has_waf:
+        posture_deductions += 0.15
+
+    # Weak security headers (scale: 0/6 = full penalty, 6/6 = none)
+    if has_http:
+        posture_deductions += (1.0 - header_score / 6.0) * 0.15
+
+    # Cookie security issues
+    cookie_issues = host_data.get('cookie_issues', [])
+    if cookie_issues:
+        posture_deductions += min(len(cookie_issues), 3) * 0.05
+
+    posture_domain = min(posture_deductions, 1.0) * 20
+
+    # ── Domain 4: SSL / Domain Integrity (0-10) ──
+    ssl_domain = 0.0
+    ssl_checked = host_data.get('ssl_checked', False)
+
+    if ssl_checked:
+        if host_data.get('ssl_dangling', False):
+            # Dangling domain — full subdomain takeover risk
+            ssl_domain = 10.0
+    elif has_http:
+        url = host_data.get('url', '')
+        if url.startswith('https'):
+            # HTTPS URL but SSL check failed (handshake error, expired, etc.)
+            ssl_domain = 6.0
+        elif not url.startswith('https'):
+            # HTTP-only, no TLS at all
+            ssl_domain = 4.0
+
+    # ── Domain 5: Attack Surface Breadth (0-10) ──
+    breadth_domain = 0.0
+    port_count = len(open_ports)
+    if port_count > 0:
+        # More open ports = wider attack surface. 1-2 is normal, 10+ is excessive.
+        breadth_domain += min(port_count / 15.0, 0.5) * 10
+
+    # Non-HTTP services increase attack surface complexity
+    services = host_data.get('services', [])
+    non_http_services = [s for s in services if s.get('name') not in ('http', 'https', 'tcpwrapped', 'unknown', '')]
+    if non_http_services:
+        breadth_domain += min(len(non_http_services) / 5.0, 0.3) * 10
+
+    # Internet-facing without CDN = direct IP exposure
+    if has_http and not host_data.get('cdn', False) and not has_waf:
+        breadth_domain += 0.2 * 10
+
+    breadth_domain = min(breadth_domain, 10.0)
+
+    # ── Domain 6: Cloud Attack Surface Exposure (0-40) ──
+    # Fed by the weighted cloud model (base_weight x exploitability x exposure).
+    # A single max-weight finding (public bucket, leaked creds) can alone drive
+    # a host to critical; additional findings add with diminishing returns.
+    cloud_domain = 0.0
+    cloud_hits = [v for v in host_vulns if v.get('source') == 'Cloud Exposure']
+    if cloud_hits:
+        cloud_scores = sorted((v.get('weighted_score') or 0) for v in cloud_hits)
+        cloud_scores.reverse()
+        top = cloud_scores[0]
+        rest = sum(cloud_scores[1:])
+        cloud_raw = top + 0.25 * rest
+        cloud_domain = min(cloud_raw / 100.0, 1.0) * 40
+
+    total = vuln_domain + secret_domain + posture_domain + ssl_domain + breadth_domain + cloud_domain
+    return max(0, min(int(round(total)), 100))
 
 
 def risk_band(score):
-    if score >= 75:
+    if score >= 70:
         return 'critical'
-    if score >= 50:
+    if score >= 45:
         return 'high'
-    if score >= 25:
+    if score >= 20:
         return 'medium'
     return 'low'
 
@@ -473,18 +677,17 @@ def risk_band(score):
 def risk_grade(org_score):
     if org_score <= 10:
         return 'A'
-    if org_score <= 25:
+    if org_score <= 20:
         return 'B'
-    if org_score <= 40:
+    if org_score <= 35:
         return 'C'
-    if org_score <= 60:
+    if org_score <= 55:
         return 'D'
     return 'F'
 
 
 def compute_risk_scores(hosts, vulns):
-    """Mutates hosts dict to add risk_score and risk_band per host."""
-    # Index vulns by host
+    """Mutates hosts dict to add risk_score, risk_band, and domain breakdown."""
     host_vulns = {}
     for v in vulns:
         h = v.get('host', 'Unknown')
@@ -506,18 +709,38 @@ def compute_risk_scores(hosts, vulns):
 
 
 def compute_org_risk(hosts):
-    """Compute org-level aggregate risk (worst-N weighted, not naive average)."""
+    """Org-level risk: weighted top-N with concentration and breadth penalties.
+
+    A CRO cares about: worst-case exposure (top hosts), how concentrated the
+    risk is (many critical hosts vs one), and what fraction of the surface is
+    exposed (breadth ratio).
+    """
     scores = sorted([h.get('risk_score', 0) for h in hosts.values()], reverse=True)
     if not scores:
         return 0, 'A'
 
-    top_n = scores[:max(10, len(scores) // 5)]
-    base = sum(top_n) / len(top_n) if top_n else 0
+    total_hosts = len(scores)
 
-    critical_count = sum(1 for s in scores if s >= 75)
-    penalty = min(critical_count * 3, 20)
+    # Base: weighted average of top 20% (min 3 hosts) — worst-case exposure
+    top_n = max(3, total_hosts // 5)
+    top_scores = scores[:top_n]
+    base = sum(top_scores) / len(top_scores)
 
-    org_score = max(0, min(int(base + penalty), 100))
+    # Concentration penalty: multiple critical hosts compound org risk
+    critical_count = sum(1 for s in scores if s >= 70)
+    high_count = sum(1 for s in scores if 45 <= s < 70)
+    concentration = min(critical_count * 4 + high_count * 1.5, 25)
+
+    # Breadth penalty: what % of hosts carry material risk (score >= 20)
+    at_risk = sum(1 for s in scores if s >= 20)
+    breadth_ratio = at_risk / total_hosts if total_hosts else 0
+    breadth_penalty = breadth_ratio * 10
+
+    # Dangling domain penalty: each dangling sub is a takeover vector
+    dangling_count = sum(1 for h in hosts.values() if h.get('ssl_dangling'))
+    dangling_penalty = min(dangling_count * 3, 10)
+
+    org_score = max(0, min(int(round(base + concentration + breadth_penalty + dangling_penalty)), 100))
     return org_score, risk_grade(org_score)
 
 
@@ -789,6 +1012,11 @@ def dashboard():
     """Main dashboard page"""
     return render_template('dashboard.html')
 
+@app.route('/kt')
+def knowledge_transfer():
+    """Knowledge Transfer document for ARISE"""
+    return render_template('kt.html')
+
 @app.route('/api/scans')
 def api_scans():
     """List all available scans"""
@@ -947,9 +1175,12 @@ def api_modules(scan_id):
         '11_param_fuzzing': 'Parameter Fuzzing',
         '12_nuclei_scanning': 'Vulnerability Scanning',
         '13_xss_testing': 'XSS Testing',
-        '14_port_scan': 'Port Scanning'
+        '14_port_scan': 'Port Scanning',
+        '15_sqli_testing': 'SQLi Testing',
+        '16_api_security': 'API Security Testing',
+        '17_cloud_exposure': 'Cloud Exposure',
     }
-    
+
     for module_dir, module_name in module_names.items():
         module_path = os.path.join(scan_dir, module_dir)
         completed = False
@@ -1012,6 +1243,40 @@ def api_risk(scan_id):
         'grade': grade,
         'band_distribution': bands,
         'host_scores': host_scores
+    })
+
+
+@app.route('/api/scan/<scan_id>/cloud')
+def api_cloud(scan_id):
+    """Cloud attack surface findings scored by the weighted model."""
+    data = get_cached_scan_data(scan_id)
+    if not data:
+        return jsonify({}), 404
+
+    cloud = [v for v in data.get('vulnerabilities', []) if v.get('source') == 'Cloud Exposure']
+    cloud.sort(key=lambda v: v.get('weighted_score', 0), reverse=True)
+
+    by_category = {}
+    sev_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+    for v in cloud:
+        cat = v.get('cloud_category', 'unknown')
+        entry = by_category.setdefault(cat, {
+            'label': v.get('template', cat),
+            'base_weight': v.get('base_weight', 0),
+            'count': 0,
+            'max_score': 0,
+        })
+        entry['count'] += 1
+        entry['max_score'] = max(entry['max_score'], v.get('weighted_score', 0))
+        sev = v.get('severity', 'info')
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
+    categories = sorted(by_category.values(), key=lambda c: c['max_score'], reverse=True)
+    return jsonify({
+        'total': len(cloud),
+        'by_severity': sev_counts,
+        'categories': categories,
+        'findings': cloud,
     })
 
 
@@ -1152,6 +1417,81 @@ def api_cves(scan_id):
     return jsonify(result)
 
 
+def _load_api_security_findings(scan_id):
+    """Read the deduplicated, tool-tagged API security findings for a scan."""
+    if not scan_id:
+        return []
+    findings_file = os.path.join(BASE_SCAN_DIR, scan_id, '16_api_security', 'api_findings.jsonl')
+    findings = []
+    if not os.path.exists(findings_file):
+        return findings
+    try:
+        with open(findings_file, 'r', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    findings.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception as exc:
+        logger.error("Failed to read API findings %s: %s", findings_file, exc)
+    return findings
+
+
+@app.route('/api/scan/<scan_id>/api-security')
+def api_api_security(scan_id):
+    """Deduplicated API security findings with per-tool tagging and a summary."""
+    findings = _load_api_security_findings(scan_id)
+
+    sev_rank = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'info': 0}
+    findings.sort(key=lambda x: (-sev_rank.get(x.get('severity', 'info'), 0), x.get('path', '')))
+
+    def _tool_count(tool):
+        return sum(1 for f in findings if tool in (f.get('tools') or [f.get('tool')]))
+
+    summary = {
+        'total': len(findings),
+        'autoswagger': _tool_count('autoswagger'),
+        'restler': _tool_count('restler'),
+        'multi_tool': sum(1 for f in findings if len(f.get('tools') or []) > 1),
+        'unique_endpoints': len({f.get('endpoint') for f in findings if f.get('endpoint')}),
+        'by_severity': {
+            s: sum(1 for f in findings if f.get('severity') == s)
+            for s in ('critical', 'high', 'medium', 'low', 'info')
+        },
+        'by_category': {},
+    }
+    for f in findings:
+        cat = f.get('category', 'other')
+        summary['by_category'][cat] = summary['by_category'].get(cat, 0) + 1
+
+    return jsonify({'summary': summary, 'findings': findings})
+
+
+@app.route('/api/api-security')
+def api_api_security_legacy():
+    """Legacy API security endpoint keyed by ?target=."""
+    scan_id = resolve_target(request.args.get('target'))
+    logger.info("API request: /api/api-security target=%s", scan_id)
+    if not scan_id:
+        return jsonify({'summary': {'total': 0, 'autoswagger': 0, 'restler': 0,
+                                    'multi_tool': 0, 'unique_endpoints': 0,
+                                    'by_severity': {}, 'by_category': {}}, 'findings': []})
+    return api_api_security(scan_id)
+
+
+@app.route('/api/cloud')
+def api_cloud_legacy():
+    """Cloud exposure endpoint keyed by ?target=."""
+    scan_id = resolve_target(request.args.get('target'))
+    logger.info("API request: /api/cloud target=%s", scan_id)
+    if not scan_id:
+        return jsonify({'total': 0, 'by_severity': {}, 'categories': [], 'findings': []})
+    return api_cloud(scan_id)
+
+
 def _legacy_host_rows(scan_id):
     data = get_cached_scan_data(scan_id)
     if not data:
@@ -1173,7 +1513,12 @@ def _legacy_host_rows(scan_id):
             'ports_open': sorted(set(host_data.get('ports_open', []))),
             'cve_count': len(host_data.get('cve_candidates', [])),
             'risk_score': host_data.get('risk_score', 0),
-            'risk_band': host_data.get('risk_band', 'low')
+            'risk_band': host_data.get('risk_band', 'low'),
+            'ssl_dangling': host_data.get('ssl_dangling', False),
+            'ssl_cert_cn': host_data.get('ssl_cert_cn', ''),
+            'ssl_checked': host_data.get('ssl_checked', False),
+            'is_api': host_data.get('is_api', False),
+            'api_signals': host_data.get('api_signals', []),
         })
     return rows
 
@@ -1289,11 +1634,13 @@ def api_hosts_legacy():
 
 @app.route('/api/hosts/search')
 def api_hosts_search():
-    """Legacy search endpoint."""
+    """Search endpoint — also respects an optional filter parameter."""
     scan_id = resolve_target(request.args.get('target'))
     query = request.args.get('q', '').strip().lower()
-    logger.info("API request: /api/hosts/search target=%s query=%s", scan_id, query)
+    filter_type = request.args.get('filter', 'all').strip()
+    logger.info("API request: /api/hosts/search target=%s query=%s filter=%s", scan_id, query, filter_type)
     hosts = _legacy_host_rows(scan_id)
+    hosts = _apply_host_filter(hosts, filter_type)
     if query:
         hosts = [h for h in hosts if query in h['host'].lower() or query in h['ip'].lower()]
     return jsonify(hosts)
@@ -1301,19 +1648,31 @@ def api_hosts_search():
 
 @app.route('/api/hosts/filter/<filter_type>')
 def api_hosts_filter(filter_type):
-    """Legacy host filter endpoint."""
+    """Filter endpoint — also respects an optional search query."""
     scan_id = resolve_target(request.args.get('target'))
-    logger.info("API request: /api/hosts/filter/%s target=%s", filter_type, scan_id)
+    query = request.args.get('q', '').strip().lower()
+    logger.info("API request: /api/hosts/filter/%s target=%s query=%s", filter_type, scan_id, query)
     hosts = _legacy_host_rows(scan_id)
-    if filter_type == 'waf':
-        hosts = [h for h in hosts if h.get('waf_vendor') != 'none']
-    elif filter_type == 'http':
-        hosts = [h for h in hosts if h.get('http_status')]
-    elif filter_type == 'resolved':
-        hosts = [h for h in hosts if h.get('resolved')]
-    elif filter_type == 'cdn':
-        hosts = [h for h in hosts if h.get('cdn')]
+    hosts = _apply_host_filter(hosts, filter_type)
+    if query:
+        hosts = [h for h in hosts if query in h['host'].lower() or query in h['ip'].lower()]
     return jsonify(hosts)
+
+
+def _apply_host_filter(hosts, filter_type):
+    if filter_type == 'waf':
+        return [h for h in hosts if (h.get('waf_vendor') or '').lower() not in ('none', '')]
+    elif filter_type == 'http':
+        return [h for h in hosts if h.get('http_status')]
+    elif filter_type == 'resolved':
+        return [h for h in hosts if h.get('resolved')]
+    elif filter_type == 'cdn':
+        return [h for h in hosts if h.get('cdn')]
+    elif filter_type == 'dangling':
+        return [h for h in hosts if h.get('ssl_dangling')]
+    elif filter_type == 'api':
+        return [h for h in hosts if h.get('is_api')]
+    return hosts
 
 
 @app.route('/api/ports')
@@ -1324,33 +1683,191 @@ def api_ports_legacy():
     return jsonify(_legacy_port_rows(scan_id))
 
 
+@app.route('/api/services')
+def api_services():
+    """Nmap service fingerprinting results with risk classification."""
+    scan_id = resolve_target(request.args.get('target'))
+    logger.info("API request: /api/services target=%s", scan_id)
+    data = get_cached_scan_data(scan_id) if scan_id else None
+    if not data:
+        return jsonify({'services': [], 'summary': {}})
+
+    hosts = data.get('hosts', {})
+    rows = []
+    proto_counts = {}
+    for host, hd in hosts.items():
+        svc_list = hd.get('services', [])
+        open_ports = sorted(set(int(p) for p in hd.get('ports_open', [])))
+        svc_map = {}
+        for svc in svc_list:
+            p = int(svc.get('port', 0))
+            svc_map[p] = svc
+
+        for port in open_ports:
+            svc = svc_map.get(port, {})
+            name = svc.get('name', PORT_MAPPINGS.get(port, 'unknown'))
+            product = svc.get('product', '')
+            version = svc.get('version', '')
+            extra = svc.get('extrainfo', '')
+            is_t1 = port in PORT_RISK_TIER1
+            is_t2 = port in PORT_RISK_TIER2
+            is_t3 = port in PORT_RISK_TIER3
+            risk = 'critical' if is_t1 else 'high' if is_t2 else 'medium' if is_t3 else 'low'
+            proto_counts[name] = proto_counts.get(name, 0) + 1
+
+            rows.append({
+                'host': host,
+                'ip': hd.get('ip', ''),
+                'port': port,
+                'service': name,
+                'product': product,
+                'version': version,
+                'extra': extra,
+                'fingerprint': f"{product} {version}".strip() if product else '',
+                'risk': risk,
+                'waf': hd.get('waf_vendor', 'none'),
+            })
+
+    unique_hosts = len(set(r['host'] for r in rows))
+    sensitive_count = sum(1 for r in rows if r['risk'] in ('critical', 'high'))
+    top_services = sorted(proto_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    return jsonify({
+        'services': rows,
+        'summary': {
+            'total_ports': len(rows),
+            'unique_hosts': unique_hosts,
+            'sensitive_ports': sensitive_count,
+            'unique_services': len(proto_counts),
+            'top_services': [{'name': n, 'count': c} for n, c in top_services],
+        }
+    })
+
+
+@app.route('/api/techstack')
+def api_techstack():
+    """Technology stack detected via httpx tech-detect across all hosts."""
+    scan_id = resolve_target(request.args.get('target'))
+    logger.info("API request: /api/techstack target=%s", scan_id)
+    if not scan_id:
+        return jsonify({'technologies': [], 'by_category': {}, 'total_hosts': 0})
+
+    http_file = os.path.join(BASE_SCAN_DIR, scan_id, '04_http_discovery/http_confirmed.json')
+    tech_counts = {}
+    tech_hosts = {}
+    total_hosts = 0
+
+    TECH_CATEGORIES = {
+        'Amazon Web Services': 'cloud', 'Amazon CloudFront': 'cdn', 'Amazon S3': 'cloud',
+        'Amazon ELB': 'cloud', 'Google Cloud': 'cloud', 'Firebase': 'cloud',
+        'Azure': 'cloud', 'Microsoft Azure': 'cloud', 'DigitalOcean': 'cloud',
+        'Cloudflare': 'cdn', 'Cloudflare Bot Management': 'security',
+        'Cloudflare Browser Insights': 'analytics', 'Fastly': 'cdn',
+        'Akamai': 'cdn', 'Varnish': 'cdn', 'jsDelivr': 'cdn', 'cdnjs': 'cdn',
+        'Nginx': 'web-server', 'Apache': 'web-server', 'IIS': 'web-server',
+        'LiteSpeed': 'web-server', 'OpenResty': 'web-server', 'Envoy': 'web-server',
+        'React': 'frontend', 'Vue.js': 'frontend', 'Angular': 'frontend',
+        'jQuery': 'frontend', 'Bootstrap': 'frontend', 'Next.js': 'frontend',
+        'Nuxt.js': 'frontend', 'Gatsby': 'frontend', 'Svelte': 'frontend',
+        'Node.js': 'backend', 'Express': 'backend', 'Django': 'backend',
+        'Flask': 'backend', 'Laravel': 'backend', 'Ruby on Rails': 'backend',
+        'Spring': 'backend', 'ASP.NET': 'backend', 'Microsoft ASP.NET': 'backend',
+        'PHP': 'backend', 'Python': 'backend', 'Go': 'backend', 'Java': 'backend',
+        'WordPress': 'cms', 'Drupal': 'cms', 'Joomla': 'cms', 'Shopify': 'cms',
+        'Magento': 'cms', 'Ghost': 'cms', 'Contentful': 'cms', 'Strapi': 'cms',
+        'Google Analytics': 'analytics', 'Google Tag Manager': 'analytics',
+        'Hotjar': 'analytics', 'Segment': 'analytics', 'Mixpanel': 'analytics',
+        'HSTS': 'security', 'HTTP/3': 'protocol', 'HTTP/2': 'protocol',
+        'GitHub Pages': 'hosting', 'Netlify': 'hosting', 'Vercel': 'hosting',
+        'Heroku': 'hosting', 'Render': 'hosting',
+        'Windows Server': 'os', 'Ubuntu': 'os', 'Debian': 'os', 'CentOS': 'os',
+        'Redis': 'database', 'MySQL': 'database', 'PostgreSQL': 'database',
+        'MongoDB': 'database', 'Elasticsearch': 'database',
+    }
+
+    CAT_LABELS = {
+        'cloud': 'Cloud Provider', 'cdn': 'CDN / Edge', 'security': 'Security',
+        'analytics': 'Analytics', 'web-server': 'Web Server', 'frontend': 'Frontend',
+        'backend': 'Backend', 'cms': 'CMS', 'protocol': 'Protocol',
+        'hosting': 'Hosting', 'os': 'Operating System', 'database': 'Database',
+        'other': 'Other',
+    }
+
+    if os.path.exists(http_file):
+        try:
+            with open(http_file, 'r', errors='ignore') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                    except Exception:
+                        continue
+                    host = entry.get('input') or entry.get('host')
+                    if host:
+                        total_hosts += 1
+                    techs = entry.get('tech', [])
+                    for t in techs:
+                        clean = t.split(':')[0].strip()
+                        tech_counts[clean] = tech_counts.get(clean, 0) + 1
+                        tech_hosts.setdefault(clean, set()).add(host or '')
+        except Exception as exc:
+            logger.error("Failed to read tech stack from %s: %s", http_file, exc)
+
+    by_category = {}
+    technologies = []
+    for name, count in sorted(tech_counts.items(), key=lambda x: x[1], reverse=True):
+        cat = TECH_CATEGORIES.get(name, 'other')
+        for prefix, prefix_cat in TECH_CATEGORIES.items():
+            if name.startswith(prefix):
+                cat = prefix_cat
+                break
+        technologies.append({
+            'name': name,
+            'count': count,
+            'hosts': len(tech_hosts.get(name, set())),
+            'category': cat,
+        })
+        by_category.setdefault(cat, {'label': CAT_LABELS.get(cat, cat.title()), 'count': 0, 'techs': []})
+        by_category[cat]['count'] += count
+        by_category[cat]['techs'].append(name)
+
+    return jsonify({
+        'technologies': technologies,
+        'by_category': by_category,
+        'total_hosts': total_hosts,
+    })
+
+
+def _load_dirsearch(scan_id):
+    """Read dirsearch results (200/403/500) for a scan into a flat list."""
+    if not scan_id:
+        return []
+    dirsearch_dir = os.path.join(BASE_SCAN_DIR, scan_id, '08_directory_discovery', 'dirsearch')
+    urls = []
+    files_to_read = [
+        ('200response.txt', 200),
+        ('forbidden_response.txt', 403),
+        ('500response.txt', 500),
+    ]
+    for filename, status_code in files_to_read:
+        file_path = os.path.join(dirsearch_dir, filename)
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            urls.append({"url": line, "status": status_code})
+            except Exception as exc:
+                logger.error("Failed to read dirsearch file %s: %s", file_path, exc)
+    return urls
+
+
 @app.route('/api/dirsearch')
 def api_dirsearch():
     """Returns dirsearch results (200, 403, 500)."""
     scan_id = resolve_target(request.args.get('target'))
     logger.info("API request: /api/dirsearch target=%s", scan_id)
-    if not scan_id:
-        return jsonify([])
-    
-    dirsearch_dir = os.path.join(BASE_SCAN_DIR, scan_id, '08_directory_discovery', 'dirsearch')
-    urls = []
-    
-    files_to_read = [
-        ('200response.txt', 200),
-        ('forbidden_response.txt', 403),
-        ('500response.txt', 500)
-    ]
-    
-    for filename, status_code in files_to_read:
-        file_path = os.path.join(dirsearch_dir, filename)
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        urls.append({"url": line, "status": status_code})
-                        
-    return jsonify(urls)
+    return jsonify(_load_dirsearch(scan_id))
 
 
 @app.route('/api/modules')
@@ -1377,6 +1894,9 @@ def api_modules_legacy():
         '12_nuclei_scanning': 'Vulnerability Scanning',
         '13_xss_testing': 'XSS Testing',
         '14_port_scan': 'Port Scanning',
+        '15_sqli_testing': 'SQLi Testing',
+        '16_api_security': 'API Security Testing',
+        '17_cloud_exposure': 'Cloud Exposure',
     }
 
     modules = {}
@@ -1471,6 +1991,219 @@ def api_report_legacy():
         return jsonify({})
     report_file = os.path.join(BASE_SCAN_DIR, scan_id, 'reports', 'report.json')
     return jsonify(load_json_file(report_file))
+
+def _host_of_url(url):
+    """Best-effort extraction of a hostname from a URL or host:port string."""
+    if not url:
+        return ''
+    try:
+        if '//' in url:
+            url = url.split('//', 1)[1]
+        return url.split('/')[0].split(':')[0]
+    except Exception:
+        return ''
+
+
+def build_host_detail(scan_id, host):
+    """Aggregate every finding for a single host into a grouped tree.
+
+    Returns the host's metadata plus a list of finding categories, each holding
+    the individual findings. This powers the click-through vulnerability report.
+    """
+    data = get_cached_scan_data(scan_id)
+    if not data or not host:
+        return {}
+
+    hosts = data.get('hosts', {})
+    host_data = hosts.get(host)
+    if host_data is None:
+        # Fall back to a case-insensitive lookup
+        for h, hd in hosts.items():
+            if h.lower() == host.lower():
+                host, host_data = h, hd
+                break
+    if host_data is None:
+        return {'host': host, 'found': False, 'categories': []}
+
+    # Collect all findings that belong to this host (by host field or URL host)
+    host_vulns = []
+    for v in data.get('vulnerabilities', []):
+        if v.get('host') == host or _host_of_url(v.get('url', '')) == host:
+            host_vulns.append(v)
+
+    # Group vulnerabilities by their source into report categories
+    source_labels = {
+        'Nuclei': 'Vulnerability Findings',
+        'Secret Scan': 'Exposed Secrets & Credentials',
+        'SQLi Testing': 'SQL Injection',
+        'XSS Testing': 'Cross-Site Scripting (XSS)',
+        'Param Fuzzing': 'File Inclusion / Path Traversal',
+    }
+    grouped = {}
+    for v in host_vulns:
+        src = v.get('source', 'Other')
+        grouped.setdefault(src, []).append(v)
+
+    severity_rank = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'info': 0}
+    categories = []
+    for src, items in grouped.items():
+        items.sort(key=lambda x: severity_rank.get(x.get('severity', 'info'), 0), reverse=True)
+        top_sev = max((i.get('severity', 'info') for i in items),
+                      key=lambda s: severity_rank.get(s, 0), default='info')
+        categories.append({
+            'key': src,
+            'name': source_labels.get(src, src),
+            'type': 'vulnerability',
+            'count': len(items),
+            'max_severity': top_sev,
+            'findings': [{
+                'title': i.get('template', 'Finding'),
+                'severity': i.get('severity', 'info'),
+                'url': i.get('url', ''),
+                'impact': i.get('impact', ''),
+                'remediation': i.get('remediation', ''),
+                'cve_id': i.get('cve_id'),
+                'source': i.get('source', ''),
+            } for i in items]
+        })
+
+    # Exposed ports as a category
+    ports = sorted(set(int(p) for p in host_data.get('ports_open', [])))
+    if ports:
+        sensitive = [p for p in ports if p in SENSITIVE_PORTS]
+        port_findings = []
+        for p in ports:
+            is_sensitive = p in SENSITIVE_PORTS
+            port_findings.append({
+                'title': 'Port ' + str(p) + ' (' + PORT_MAPPINGS.get(p, 'Unknown') + ')',
+                'severity': 'high' if is_sensitive else 'info',
+                'url': host + ':' + str(p),
+                'impact': ('Sensitive service exposed to the internet' if is_sensitive
+                           else 'Open port reachable from the internet'),
+                'remediation': ('Restrict access via firewall/VPN' if is_sensitive else ''),
+                'source': 'Port Scan',
+            })
+        categories.append({
+            'key': 'ports',
+            'name': 'Exposed Ports',
+            'type': 'infrastructure',
+            'count': len(ports),
+            'max_severity': 'high' if sensitive else 'info',
+            'findings': port_findings,
+        })
+
+    # Security header posture as a category
+    missing_headers = host_data.get('missing_headers', [])
+    if host_data.get('http_status') and missing_headers:
+        categories.append({
+            'key': 'headers',
+            'name': 'Missing Security Headers',
+            'type': 'posture',
+            'count': len(missing_headers),
+            'max_severity': 'medium' if len(missing_headers) >= 4 else 'low',
+            'findings': [{
+                'title': h,
+                'severity': 'low',
+                'url': '',
+                'impact': 'Security header not set',
+                'remediation': 'Add the ' + h + ' response header',
+                'source': 'Header Analysis',
+            } for h in missing_headers]
+        })
+
+    # Discovered directories for this host (from dirsearch output)
+    dir_hits = []
+    for entry in _load_dirsearch(scan_id):
+        if _host_of_url(entry.get('url', '')) == host:
+            dir_hits.append(entry)
+    if dir_hits:
+        dir_hits.sort(key=lambda e: (e.get('status') != 200, e.get('url', '')))
+        categories.append({
+            'key': 'directories',
+            'name': 'Discovered Directories & Files',
+            'type': 'discovery',
+            'count': len(dir_hits),
+            'max_severity': 'medium' if any(e.get('status') == 200 for e in dir_hits) else 'low',
+            'findings': [{
+                'title': ('[' + str(e.get('status')) + '] ') + e.get('url', ''),
+                'severity': 'medium' if e.get('status') == 200 else 'low',
+                'url': e.get('url', ''),
+                'impact': 'Reachable path (HTTP ' + str(e.get('status')) + ')',
+                'remediation': ('Restrict or remove exposed path' if e.get('status') == 200 else ''),
+                'source': 'Directory Discovery',
+            } for e in dir_hits]
+        })
+
+    # Cookie issues
+    cookie_issues = host_data.get('cookie_issues', [])
+    if cookie_issues:
+        categories.append({
+            'key': 'cookies',
+            'name': 'Cookie Security Issues',
+            'type': 'posture',
+            'count': len(cookie_issues),
+            'max_severity': 'low',
+            'findings': [{
+                'title': str(c),
+                'severity': 'low',
+                'url': '',
+                'impact': 'Cookie missing a security attribute',
+                'remediation': 'Set Secure, HttpOnly and SameSite attributes',
+                'source': 'Header Analysis',
+            } for c in cookie_issues]
+        })
+
+    categories.sort(key=lambda c: severity_rank.get(c.get('max_severity', 'info'), 0), reverse=True)
+
+    severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+    for cat in categories:
+        for f in cat['findings']:
+            s = f.get('severity', 'info')
+            severity_counts[s] = severity_counts.get(s, 0) + 1
+
+    return {
+        'host': host,
+        'found': True,
+        'ip': host_data.get('ip', ''),
+        'url': host_data.get('url', ''),
+        'resolved': host_data.get('resolved', False),
+        'http_status': host_data.get('http_status', ''),
+        'cdn': host_data.get('cdn', False),
+        'waf_vendor': host_data.get('waf_vendor', 'none'),
+        'is_api': host_data.get('is_api', False),
+        'api_signals': host_data.get('api_signals', []),
+        'server_banner': host_data.get('server_banner', ''),
+        'security_header_score': host_data.get('security_header_score', 0),
+        'ssl_dangling': host_data.get('ssl_dangling', False),
+        'ssl_cert_cn': host_data.get('ssl_cert_cn', ''),
+        'risk_score': host_data.get('risk_score', 0),
+        'risk_band': host_data.get('risk_band', 'low'),
+        'ports': ports,
+        'total_findings': sum(severity_counts.values()),
+        'severity_counts': severity_counts,
+        'categories': categories,
+    }
+
+
+@app.route('/api/scan/<scan_id>/host/<path:host>')
+def api_host_detail(scan_id, host):
+    """Full drill-down report tree for a single host within a scan."""
+    detail = build_host_detail(scan_id, host)
+    if not detail:
+        return jsonify({}), 404
+    return jsonify(detail)
+
+
+@app.route('/api/host')
+def api_host_detail_legacy():
+    """Host drill-down keyed by ?target=&host=."""
+    scan_id = resolve_target(request.args.get('target'))
+    host = request.args.get('host', '')
+    logger.info("API request: /api/host target=%s host=%s", scan_id, host)
+    if not scan_id or not host:
+        return jsonify({})
+    return jsonify(build_host_detail(scan_id, host))
+
 
 # ===========================================================================
 # MAIN

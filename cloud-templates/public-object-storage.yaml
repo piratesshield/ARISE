@@ -1,0 +1,55 @@
+id: arise-public-object-storage
+
+info:
+  name: Public Cloud Object Storage Listing
+  author: arise
+  severity: high
+  description: >
+    Detects a publicly listable cloud object storage bucket (AWS S3, Google
+    Cloud Storage, Azure Blob). A world-readable listing discloses every object
+    key and is the classic root cause of large-scale data leaks. Read access is
+    confirmed; write access is not tested by this template.
+  reference:
+    - https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-overview.html
+  classification:
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N
+    cvss-score: 7.5
+    cwe-id: CWE-284
+  metadata:
+    arise-category: public_cloud_storage
+    arise-weight: 100
+  tags: arise,cloud,exposure,s3,gcs,azure,bucket
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?list-type=2"
+      - "{{BaseURL}}/"
+
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: body
+        words:
+          # AWS S3 XML listing
+          - "<ListBucketResult"
+          # Google Cloud Storage XML listing
+          - "<ListBucketResult xmlns=\"http://doc.s3.amazonaws.com"
+          - "<EnumerationResults"        # Azure Blob container listing
+          - "ListAllMyBucketsResult"
+        condition: or
+
+    extractors:
+      - type: regex
+        part: body
+        name: first_object_key
+        group: 1
+        regex:
+          - "<Key>([^<]+)</Key>"
+          - "<Name>([^<]+)</Name>"
+          - "<Blob><Name>([^<]+)</Name>"

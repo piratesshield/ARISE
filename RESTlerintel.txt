@@ -1,0 +1,333 @@
+================================================================================
+ RESTlerintel.txt  —  Intelligence dossier on Microsoft RESTler for ARISE
+ Compiled: 2026-07-09
+ Purpose : Understand RESTler deeply (docs, papers, community, empirical CLI),
+           then define exactly how ARISE should drive it. Cross-references the
+           API-module audit (Module 16). Read BEFORE touching module_api_security.
+================================================================================
+
+--------------------------------------------------------------------------------
+0. TL;DR (what to do differently in ARISE)
+--------------------------------------------------------------------------------
+1. RESTler is a STATEFUL, spec-driven fuzzer. Its whole value is producer->
+   consumer sequencing (create a resource, then use its id). If you feed it a
+   thin/partial spec, it degrades to shallow single-request testing — exactly
+   what ARISE gets today.
+2. Our current invocation is broken three ways (see Section 7): `--time_budget`
+   is a FUZZ-only flag (not fuzz-lean), `--working_dir` is not a flag at all
+   (the global is `--workingDirPath`, and it goes BEFORE the subcommand), and
+   `compile` writes to CWD so our grammar search misses it.
+3. RESTler's default oracle only flags HTTP 500s + a handful of checkers. It
+   CANNOT see auth bypass, data exposure, IDOR, or 4xx logic bugs. So RESTler
+   is a ROBUSTNESS tool, not an auth tool — pair it with autoswagger (authz)
+   and Schemathesis (property/spec-conformance), never rely on it alone.
+4. Unauthenticated fuzzing barely reaches business logic. To get value we must
+   wire `token_refresh_command` so RESTler fuzzes as an authenticated user.
+5. Fuzz mode can DoS a fragile service. Keep fuzz-lean as default; gate full
+   `fuzz` + time budget behind an explicit "authorized/intrusive" mode.
+
+--------------------------------------------------------------------------------
+1. WHAT RESTLER IS  (identity & core idea)
+--------------------------------------------------------------------------------
+- "The first stateful REST API fuzzing tool" (Microsoft Research, ICSE 2019).
+- Input: an OpenAPI/Swagger spec. Output: sequences of HTTP requests that
+  exercise the service and surface security/reliability bugs.
+- Written in Python + F#. Runs on .NET (invoked via dotnet Restler.dll).
+- Core innovation vs dumb fuzzers: it INFERS PRODUCER->CONSUMER DEPENDENCIES
+  from the spec. Example it learns: `POST /users` returns an id, so before
+  fuzzing `GET /users/{id}` it first creates a user, captures the id from the
+  response, and threads it into the next request. This lets it reach deep states
+  reachable only through specific request ORDERS — the thing single-shot
+  scanners (and our current setup) never do.
+- It also "dynamically learns from prior responses" to prune invalid sequences.
+
+--------------------------------------------------------------------------------
+2. PHASES & THE REAL CLI  (verified empirically: `restler --help`, v9.x)
+--------------------------------------------------------------------------------
+Top-level usage:
+  restler [global options] ( compile | test | fuzz-lean | fuzz | replay |
+                             generate_config )
+
+GLOBAL options (MUST precede the subcommand):
+  --workingDirPath <dir>   Where ALL outputs go. DEFAULT = current directory.
+                           ^ This is the flag ARISE is missing. Everything
+                             (Compile/, RestlerResults/, logs) lands here.
+  --python_path <path>     Python used to launch the engine.
+  --disable_log_upload     Don't upload logs anywhere.
+
+PHASES:
+  compile   --api_spec <spec.json>
+            -> Static analysis of the spec. Produces the fuzzing GRAMMAR.
+            Outputs (under workingDir): Compile/grammar.py, Compile/dict.json,
+            Compile/grammar.json, Compile/config.json, and a
+            "unresolved dependencies" report you should read.
+
+  test      (a.k.a. "smoke test") --grammar_file --dictionary_file ...
+            -> Executes each request ONCE to see what actually works. Use this
+            to measure spec quality / coverage before fuzzing. Creates any
+            prerequisite resources. Fast.
+
+  fuzz-lean --grammar_file --dictionary_file ...
+            -> test mode + a SUBSET of checkers = quick bug hunt. RECOMMENDED
+            first real run. NOTE: takes "the same options as test" — it does
+            NOT accept --time_budget (that is fuzz-only).
+
+  fuzz      --grammar_file --dictionary_file --time_budget <HOURS>
+            [--search_strategy bfs-fast|bfs|bfs-cheap|random-walk]
+            -> Full stateful search; explores request combinations & sequences.
+            --time_budget is in HOURS (float). Can be aggressive -> outage risk.
+
+  replay    --replay_log <bug_bucket file>
+            -> Re-runs a saved bug sequence to confirm reproducibility.
+
+SHARED test/fuzz options that MATTER for us:
+  --target_ip / --target_port / --no_ssl / --host   (override target)
+  --settings <engine_settings.json>                 (fine-grained control)
+  --token_refresh_interval <seconds>                (auth; see Section 5)
+  --token_refresh_command "<cmd>"                   (auth; see Section 5)
+  --producer_timing_delay <seconds>                 (wait after create)
+  --path_regex "<regex>"                            (scope which paths to fuzz)
+  --enable_checkers / --disable_checkers <csv>      (see Section 4)
+  --no_results_analyzer                             (skip the analyzer)
+
+--------------------------------------------------------------------------------
+3. OUTPUT STRUCTURE & FILE FORMATS  (what to parse)
+--------------------------------------------------------------------------------
+Under <workingDir>:
+  Compile/
+    grammar.py         the fuzzing grammar (Python)
+    dict.json          the mutations dictionary (fuzzable values)
+    grammar.json       machine-readable grammar
+    config.json        auto-generated compiler config (edit to add annotations)
+  Test|FuzzLean|Fuzz/
+    RestlerResults/experiment<GUID>/
+      logs/                       network.txt logs (every request/response)
+      bug_buckets/
+        bug_buckets.txt           <-- HUMAN SUMMARY of all bugs
+        <bugtype>_<n>.txt         <-- one file PER unique bug (repro sequence)
+      ResponseBuckets/
+        runSummary.json           <-- bucket IDs + counts (MACHINE READABLE)
+        errorBuckets.json         <-- bucket descriptions
+
+bug_buckets.txt structure (per official docs):
+  * TOP SECTION: a list of every bug TYPE found this run + the count for each.
+    A "bug type" = how it was found: `main_driver_500` (a raw 500 from the main
+    driver) or a CHECKER name (e.g. `UseAfterFreeChecker`, `NameSpaceRuleChecker`).
+  * THEN, one block per bug. Each block header states: the bug type, whether it
+    was REPRODUCIBLE, and the filename of the per-bug log with full detail.
+  * The triggering REQUEST SEQUENCE is listed, one request per line, in order,
+    "with their method and endpoint only" (last line = the failing request).
+
+  >>> AUDIT CORRECTION for ARISE: the official docs say request lines are shown
+      as method+endpoint (e.g. "GET /api/foo"), which DOES fit our current
+      `^(GET|POST|...)` parser. BUT the exact layout has drifted across RESTler
+      versions and per-bug files differ from the summary. Do NOT trust the
+      hand-rolled text parse blindly. Prefer, in order:
+        (1) ResponseBuckets/runSummary.json + errorBuckets.json (stable, JSON)
+        (2) the per-bug <bugtype>_<n>.txt files (has repro flag + full sequence)
+        (3) bug_buckets.txt text (last resort; pin to installed version)
+
+--------------------------------------------------------------------------------
+4. THE BUG ORACLE & CHECKERS  (what RESTler can and cannot detect)
+--------------------------------------------------------------------------------
+Default oracle = TWO things only:
+  (a) Any HTTP 500 "Internal Server Error"  -> reported as a bug.
+  (b) Checker violations (targeted extra requests probing specific logic bugs).
+
+Checkers available (from CLI; default set in fuzz/fuzz-lean = all EXCEPT
+namespacerule):
+  leakagerule          resource leak: a failed create still leaves a usable id
+  resourcehierarchy    child resource accessible under the wrong parent (authz-ish)
+  useafterfree         resource usable after it was deleted
+  namespacerule        cross-user/tenant access to another namespace's resource
+                       (OFF by default -> ENABLE it, it's the closest thing to
+                        a BOLA/authz signal RESTler has)
+  invaliddynamicobject reuse of an invalid/expired dynamic object
+  payloadbody          payload-body fuzzing (malformed JSON bodies)
+  examples             uses spec `examples` as seeds
+  invalidvalue         injects invalid values for typed fields
+
+HARD LIMITS OF THE ORACLE (critical for expectations):
+  - It ONLY sees bugs visible as unexpected HTTP status codes. It CANNOT detect
+    Information Exposure, sensitive-data leakage, or auth-bypass that returns 200.
+    (Confirmed by the RESTler paper and community.)
+  - No support for endpoints doing server-side redirects (301/303/307) — those
+    requests are skipped.
+  - It is a ROBUSTNESS/RELIABILITY oracle, not a confidentiality oracle. This is
+    exactly why ARISE must keep autoswagger (auth/authz/data exposure) as a
+    SEPARATE, co-equal tool and not expect RESTler to cover BOLA/broken-auth.
+
+--------------------------------------------------------------------------------
+5. AUTHENTICATION  (the single biggest lever for real coverage)
+--------------------------------------------------------------------------------
+- Unauthenticated fuzzing mostly bounces off the auth layer (401/403) and never
+  reaches business logic. Community consensus + the coverage paper agree: the
+  API's real code is behind auth.
+- RESTler auth model:
+    --token_refresh_command "<cmd>"   a command RESTler runs to fetch a token
+    --token_refresh_interval <sec>    how often to re-run it (tokens expire)
+  The command must PRINT the token to stdout in RESTler's expected format:
+    a metadata line, then the auth header value, e.g.:
+        {u'app': {}}                      <- metadata/refresh line
+        Authorization: Bearer <TOKEN>     <- the header RESTler injects
+  (RESTler ships sample token scripts; newer versions also accept a module.)
+- Community pain point (GitHub issue #877 and others): token-via-file setups
+  "do not work as expected"; dynamic auth requires writing a small script per
+  target. Plan for a pluggable token-command hook, not a static token.
+
+>>> ARISE implication: add optional env vars, e.g.
+      APISEC_AUTH_TOKEN_CMD, APISEC_AUTH_REFRESH_SEC
+    and pass them through to RESTler (and an Authorization header to autoswagger)
+    so authenticated runs are possible where the operator supplies creds.
+
+--------------------------------------------------------------------------------
+6. KNOWN LIMITATIONS & COMMUNITY INTEL  (why runs underperform)
+--------------------------------------------------------------------------------
+From docs, the ICSE'19 paper, FuzzCon 2021, and the tool-comparison study
+(Zhang & Arcuri, "Open Problems in Fuzzing RESTful APIs", arXiv:2205.05325):
+
+  * COVERAGE CEILING: across 19 real APIs, NO black-box fuzzer exceeded ~60%
+    average line coverage in 1h; RESTler was among the compared tools and left
+    large parts of business logic untouched. Expect partial coverage, always.
+  * UNDERSPECIFIED SCHEMAS are the #1 blocker. If the spec omits constraints,
+    formats, required fields, or examples, the fuzzer can't synthesize valid
+    inputs and stalls at input validation. Real specs are often hand-written and
+    wrong/incomplete.
+  * PRODUCER->CONSUMER MATCHING is heuristic: it relies on the id field in a
+    create response having the SAME/similar name as the path parameter. If the
+    API returns ids inconsistently (or only via Location headers it doesn't
+    parse), dependencies stay UNRESOLVED and whole endpoint trees go untested.
+  * UNRESOLVED DEPENDENCIES after compile are common; the fix is ANNOTATIONS
+    (x-restler producer/consumer hints) or a custom dictionary — manual work.
+  * DATABASE/EXTERNAL-SERVICE STATE: endpoints needing pre-existing DB rows or
+    calls to other services can't be reached from a cold spec.
+  * SETUP COST: multi-step (compile -> grammar -> fuzz), .NET runtime, minimal
+    docs; easy to misconfigure (as ARISE did).
+  * NOT A RELEASE BINARY: distributed via source/tagged commits; invocation is
+    `dotnet Restler.dll` (our wrapper `restler` -> that). On case-sensitive
+    Linux the artifact is `Restler.dll`; a bare `restler` binary does not exist
+    unless you (or a wrapper/symlink) create it. <-- the "case sensitivity /
+    how it is called" issue flagged earlier.
+  * OUTPUT VERBOSITY: huge network logs; parse the JSON buckets, not the logs.
+  * FUZZ MODE CAN CAUSE OUTAGES on poorly implemented services (docs warn).
+
+--------------------------------------------------------------------------------
+7. HOW ARISE CURRENTLY MIS-USES RESTLER  (Module 16 defects)
+--------------------------------------------------------------------------------
+File: easm-pipeline.sh, function _apisec_run_restler (~L2154-2178)
+
+  BUG-R1  fuzz-lean is called with `--time_budget` -> INVALID (fuzz-only flag).
+          RESTler exits "Invalid argument: --time_budget". Fuzzing never runs.
+  BUG-R2  `--working_dir` is not a RESTler flag. Correct = global
+          `--workingDirPath <dir>` placed BEFORE the subcommand.
+  BUG-R3  `compile` writes to CWD (workingDirPath default = cwd = project root),
+          so Compile/grammar.py is created in the repo root, while the code does
+          `find "$out_dir" -name grammar.py` and finds nothing -> "no grammar
+          produced" -> RESTler skipped even when compile succeeded.
+  BUG-R4  Result parsing keys off bug_buckets.txt with a fragile text scrape and
+          no fallback to the stable ResponseBuckets/*.json (see Section 3).
+  BUG-R5  `--dictionary_file "$dict"` passes an empty string when dict isn't
+          found -> arg error.
+  DEP     RESTLER_BIN default "restler" only exists because a local wrapper maps
+          it to `dotnet Restler.dll`; document/detect the real launcher.
+
+--------------------------------------------------------------------------------
+8. CORRECTED INVOCATION  (drop-in reference for the fix)
+--------------------------------------------------------------------------------
+  WD="$out_dir"                       # per-host working dir
+  # 1) compile INTO the working dir
+  "$RESTLER_BIN" --workingDirPath "$WD" compile --api_spec "$spec_file" \
+      > "$WD/compile.log" 2>&1
+  grammar="$WD/Compile/grammar.py"
+  dict="$WD/Compile/dict.json"
+  [ -f "$grammar" ] || { log_warn "restler: no grammar"; return 0; }
+
+  # 2) authenticated, bounded fuzz-lean (NO --time_budget here)
+  auth_args=()
+  [ -n "$APISEC_AUTH_TOKEN_CMD" ] && auth_args+=(--token_refresh_command "$APISEC_AUTH_TOKEN_CMD"
+                                                  --token_refresh_interval "${APISEC_AUTH_REFRESH_SEC:-300}")
+  "$RESTLER_BIN" --workingDirPath "$WD" fuzz-lean \
+      --grammar_file "$grammar" \
+      ${dict:+--dictionary_file "$dict"} \
+      --enable_checkers namespacerule \
+      --no_ssl_off_by_default_is_fine   # (use --no_ssl only for http targets)
+      "${auth_args[@]}" \
+      > "$WD/fuzz.log" 2>&1
+
+  # 3) OPTIONAL full fuzz with budget (intrusive mode only)
+  #   "$RESTLER_BIN" --workingDirPath "$WD" fuzz --grammar_file "$grammar" \
+  #       --dictionary_file "$dict" --time_budget "$HOURS" --search_strategy bfs-cheap
+
+  # 4) parse results from JSON first
+  #   $WD/**/RestlerResults/experiment*/ResponseBuckets/runSummary.json
+  #   $WD/**/RestlerResults/experiment*/bug_buckets/*.txt  (fallback)
+
+--------------------------------------------------------------------------------
+9. IMPROVEMENT PLAN FOR ARISE  (prioritized)
+--------------------------------------------------------------------------------
+P0 (correctness — makes RESTler run at all):
+  [ ] Fix R1/R2/R3/R5 with the invocation in Section 8.
+  [ ] Parse ResponseBuckets/runSummary.json + per-bug files; treat bug_buckets
+      .txt as fallback. Map: main_driver_500/*500* -> server_error(high);
+      useafterfree/leakagerule -> stateful_bug(medium); namespacerule/
+      resourcehierarchy -> broken_object_authorization(high).
+  [ ] Detect the real launcher: prefer $RESTLER_BIN, else `dotnet <Restler.dll>`.
+
+P1 (coverage — makes RESTler find real bugs):
+  [ ] Run `test` (smoke) FIRST; log resolved vs unresolved dependencies and the
+      % of requests that executed. If most requests fail, the spec is too thin —
+      record that as a finding ("API9 improper inventory / poor spec") instead of
+      silently producing nothing.
+  [ ] Wire authenticated fuzzing via APISEC_AUTH_TOKEN_CMD / refresh interval.
+  [ ] Enable the `namespacerule` checker (closest thing to a tenant/BOLA signal).
+  [ ] Feed a merged/enriched spec: if only a partial spec is found, still fuzz;
+      if multiple spec paths exist, compile each.
+
+P2 (depth & safety):
+  [ ] "Engagement mode": passive (skip), safe (fuzz-lean, low rate), intrusive
+      (fuzz + time_budget) — mirror the CLOUD_ALLOW_WRITE_TEST gating pattern.
+  [ ] producer_timing_delay + rate limiting to avoid outages.
+  [ ] path_regex scoping to keep fuzzing in authorized scope.
+
+P3 (fill the gaps RESTler cannot cover — add complementary engines):
+  [ ] Schemathesis (pip, property-based, strong in the coverage paper) for
+      spec-conformance + 500s on GET-heavy APIs; complements RESTler's stateful
+      writes. It also emits JUnit/JSON that's easy to ingest.
+  [ ] Keep autoswagger for auth/authz/data-exposure (RESTler is blind to these).
+  [ ] GraphQL introspection + JWT (alg=none/weak-secret) checks — neither RESTler
+      nor autoswagger covers these; they are separate ARISE modules to add.
+
+--------------------------------------------------------------------------------
+10. ONE-LINE MENTAL MODEL
+--------------------------------------------------------------------------------
+  RESTler = "stateful robustness fuzzer that finds 500s and state bugs behind
+  a GOOD spec and VALID auth."  Give it a rich spec + a token, run test then
+  fuzz-lean, read the JSON buckets. It is one leg of a tripod:
+      RESTler (robustness/state)  +  autoswagger (authz/exposure)  +
+      Schemathesis (spec-conformance)  =  a defensible API attack-surface pass.
+
+--------------------------------------------------------------------------------
+SOURCES
+--------------------------------------------------------------------------------
+- RESTler repo & docs (QuickStart, Fuzzing, BugBuckets, ResultsAnalyzer,
+  Authentication, BestPractices, ImprovingCoverage, FuzzingDictionary):
+    https://github.com/microsoft/restler-fuzzer
+    https://github.com/microsoft/restler-fuzzer/tree/main/docs/user-guide
+- RESTler: Stateful REST API Fuzzing (Atlidakis, Godefroid, Polishchuk), ICSE 2019:
+    https://patricegodefroid.github.io/public_psfiles/icse2019.pdf
+- Microsoft Research project page:
+    https://www.microsoft.com/en-us/research/publication/restler-stateful-rest-api-fuzzing/
+- Authentication config pain (community):
+    https://github.com/microsoft/restler-fuzzer/issues/877
+- Stateful REST API Fuzzing with RESTler, FuzzCon Europe 2021 (Polishchuk, slides).
+- Code Intelligence: "Stateful REST API Fuzzing with RESTler":
+    https://www.code-intelligence.com/blog/stateful-rest-api-fuzzing
+- Zhang & Arcuri, "Open Problems in Fuzzing RESTful APIs: A Comparison of Tools",
+  arXiv:2205.05325  (coverage ceiling, underspecified schemas, dependency &
+  external-service limits):
+    https://arxiv.org/pdf/2205.05325
+- Practitioner tutorials (Galdino; Bezerra; Vasconcelos) on Medium for the
+  compile->test->fuzz workflow and bug_buckets walkthroughs.
+- Empirical: `restler --help` on the installed build (v9.x wrapper ->
+  dotnet Restler.dll), captured during this audit.
+================================================================================

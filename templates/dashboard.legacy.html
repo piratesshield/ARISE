@@ -1,0 +1,1756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARISE - Summon Every Hidden Exposure.</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 2px solid #0f3460;
+            margin-bottom: 20px;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        /* Target Selector */
+        .target-selector {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .target-selector label {
+            font-size: 1.1em;
+            color: #00d4ff;
+        }
+
+        .target-dropdown {
+            padding: 12px 20px;
+            font-size: 1em;
+            border: 2px solid #0f3460;
+            border-radius: 25px;
+            background: rgba(22, 33, 62, 0.9);
+            color: #e0e0e0;
+            min-width: 250px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .target-dropdown:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        .target-dropdown option {
+            background: #16213e;
+            padding: 10px;
+        }
+
+        .revision-selector {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin: -5px 0 20px;
+            flex-wrap: wrap;
+        }
+
+        .revision-selector label {
+            font-size: 0.95em;
+            color: #9fb5c7;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            background: rgba(15, 52, 96, 0.6);
+            padding: 15px 25px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.running { background: #ffd700; }
+        .status-dot.completed { background: #00ff88; animation: none; }
+        .status-dot.error { background: #ff6b6b; animation: none; }
+        .status-dot.no_data { background: #888; animation: none; }
+        .status-dot.completed_with_errors { background: #ff9500; animation: none; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid #0f3460;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            background: rgba(0, 212, 255, 0.1);
+            border-color: #00d4ff;
+            transform: translateY(-2px);
+        }
+
+        .stat-card.ports { border-left: 4px solid #8a2be2; }
+        .stat-card.services { border-left: 4px solid #32cd32; }
+
+        .stat-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            color: #00d4ff;
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .stat-unit {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .comparison-card {
+            background: rgba(15, 52, 96, 0.32);
+            border: 1px solid rgba(0, 212, 255, 0.16);
+            border-radius: 8px;
+            padding: 14px;
+        }
+
+        .comparison-label {
+            color: #9fb5c7;
+            font-size: 0.82em;
+            margin-bottom: 8px;
+        }
+
+        .comparison-value {
+            color: #e0e0e0;
+            font-size: 1.35em;
+            font-weight: bold;
+        }
+
+        .comparison-value.positive { color: #00ff88; }
+        .comparison-value.negative { color: #ff6b6b; }
+
+        /* Navigation Tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #0f3460;
+            padding-bottom: 10px;
+            overflow-x: auto;
+            flex-wrap: wrap;
+        }
+
+        .nav-tab {
+            padding: 10px 20px;
+            background: rgba(15, 52, 96, 0.3);
+            border: 1px solid #0f3460;
+            border-radius: 5px;
+            cursor: pointer;
+            color: #00d4ff;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .nav-tab.active {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
+            color: #00ff88;
+        }
+
+        .nav-tab:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Table Styles */
+        .table-container {
+            overflow-x: auto;
+            background: rgba(15, 52, 96, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: rgba(0, 212, 255, 0.2);
+            padding: 12px;
+            text-align: left;
+            color: #00d4ff;
+            border-bottom: 2px solid #0f3460;
+            cursor: pointer;
+        }
+
+        th:hover {
+            background: rgba(0, 212, 255, 0.3);
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+        }
+
+        tr:hover {
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        /* Status Badges */
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .badge-success { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
+        .badge-warning { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
+        .badge-danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+        .badge-critical { background: rgba(255, 0, 85, 0.2); color: #ff0055; }
+        .badge-info { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+
+        /* Risk band badges */
+        .risk-critical { background: rgba(255, 0, 85, 0.25); color: #ff0055; }
+        .risk-high { background: rgba(255, 107, 107, 0.25); color: #ff6b6b; }
+        .risk-medium { background: rgba(255, 165, 0, 0.25); color: #ffa500; }
+        .risk-low { background: rgba(0, 255, 136, 0.25); color: #00ff88; }
+
+        /* Vulnerability List */
+        .vuln-list {
+            list-style: none;
+        }
+
+        .vuln-item {
+            background: rgba(15, 52, 96, 0.4);
+            border-left: 4px solid #ff6b6b;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .vuln-item:hover {
+            background: rgba(15, 52, 96, 0.6);
+            transform: translateX(5px);
+        }
+
+        .vuln-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .vuln-title {
+            font-weight: bold;
+            color: #ff6b6b;
+        }
+
+        .vuln-details {
+            font-size: 0.9em;
+            color: #aaa;
+            margin-top: 8px;
+        }
+
+        .vuln-details strong {
+            color: #00d4ff;
+        }
+
+        /* Filter Buttons */
+        .filter-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 8px 15px;
+            background: rgba(15, 52, 96, 0.3);
+            border: 1px solid #0f3460;
+            border-radius: 20px;
+            color: #00d4ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .filter-btn.active {
+            background: rgba(0, 212, 255, 0.3);
+            border-color: #00d4ff;
+            color: #00ff88;
+        }
+
+        .filter-btn:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        /* Help Tooltips */
+        .help-tip {
+            position: relative;
+            display: inline-block;
+            margin-left: 4px;
+            cursor: help;
+            width: 14px;
+            height: 14px;
+            line-height: 14px;
+            text-align: center;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            color: #888;
+            font-size: 10px;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+        .help-tip:hover { background: rgba(0,212,255,0.2); color: #00d4ff; }
+        .help-tip .help-text {
+            display: none;
+            position: absolute;
+            bottom: 120%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a2e;
+            color: #ccc;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 11px;
+            font-weight: normal;
+            white-space: nowrap;
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .help-tip:hover .help-text { display: block; }
+
+        /* Search Box */
+        .search-box {
+            padding: 10px 15px;
+            background: rgba(15, 52, 96, 0.3);
+            border: 1px solid #0f3460;
+            border-radius: 25px;
+            color: #e0e0e0;
+            margin-bottom: 15px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .search-box::placeholder {
+            color: #666;
+        }
+
+        /* Loading State */
+        .loading {
+            text-align: center;
+            color: #888;
+            padding: 20px;
+            font-style: italic;
+        }
+
+        /* Error State */
+        .error-message {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid #ff6b6b;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        /* Warning Banner */
+        .warning-banner {
+            background: rgba(255, 165, 0, 0.15);
+            border: 1px solid #ffa500;
+            color: #ffa500;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        /* Executive Summary */
+        .exec-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .exec-kpi {
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .exec-kpi .kpi-value {
+            font-size: 3em;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .exec-kpi .kpi-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 8px;
+        }
+
+        .exec-kpi .kpi-sub {
+            color: #666;
+            font-size: 0.8em;
+            margin-top: 4px;
+        }
+
+        .grade-A { color: #00ff88; border-color: #00ff88; }
+        .grade-B { color: #7fff00; border-color: #7fff00; }
+        .grade-C { color: #ffd700; border-color: #ffd700; }
+        .grade-D { color: #ff9500; border-color: #ff9500; }
+        .grade-F { color: #ff0055; border-color: #ff0055; }
+
+        /* Severity bar */
+        .severity-bar {
+            display: flex;
+            height: 24px;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 15px 0;
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .severity-bar .seg-critical { background: #ff0055; }
+        .severity-bar .seg-high { background: #ff6b6b; }
+        .severity-bar .seg-medium { background: #ff9500; }
+        .severity-bar .seg-low { background: #ffd700; }
+        .severity-bar .seg-info { background: #00d4ff; }
+
+        .severity-legend {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .severity-legend .leg-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+
+        .severity-legend .leg-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .priority-list {
+            list-style: none;
+        }
+
+        .priority-item {
+            background: rgba(15, 52, 96, 0.4);
+            border-left: 4px solid #ff0055;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .priority-item .pri-text {
+            flex: 1;
+        }
+
+        .priority-item .pri-host {
+            color: #00d4ff;
+            font-size: 0.85em;
+        }
+
+        /* Trend chart */
+        .trend-container {
+            background: rgba(15, 52, 96, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .trend-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            height: 120px;
+            padding: 0 10px;
+        }
+
+        .trend-bar {
+            flex: 1;
+            min-width: 30px;
+            max-width: 60px;
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .trend-bar:hover {
+            opacity: 0.8;
+        }
+
+        .trend-bar .trend-label {
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.65em;
+            color: #888;
+            white-space: nowrap;
+        }
+
+        .trend-bar .trend-score {
+            position: absolute;
+            top: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+
+        /* Changes tab */
+        .change-section {
+            margin-bottom: 25px;
+        }
+
+        .change-section h3 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .change-list {
+            list-style: none;
+        }
+
+        .change-list li {
+            padding: 6px 12px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .change-added {
+            background: rgba(0, 255, 136, 0.1);
+            border-left: 3px solid #00ff88;
+            color: #00ff88;
+        }
+
+        .change-removed {
+            background: rgba(255, 107, 107, 0.1);
+            border-left: 3px solid #ff6b6b;
+            color: #ff6b6b;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .exec-kpi-grid { grid-template-columns: 1fr 1fr; }
+            .status-bar { flex-direction: column; align-items: flex-start; }
+            header h1 { font-size: 1.8em; }
+            table { font-size: 0.85em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ARISE</h1>
+            <p>Summon Every Hidden Exposure.</p>
+        </header>
+
+        <!-- Target Selector -->
+        <div class="target-selector">
+            <label for="targetDropdown">Select Target:</label>
+            <select id="targetDropdown" class="target-dropdown">
+                <option value="">Loading targets...</option>
+            </select>
+        </div>
+
+        <div class="revision-selector">
+            <label for="revisionDropdown">Revision:</label>
+            <select id="revisionDropdown" class="target-dropdown">
+                <option value="">Latest scan</option>
+            </select>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Status: Loading...</span>
+            </div>
+            <div id="scanInfo" style="color: #888; font-size: 0.9em;"></div>
+        </div>
+
+        <div class="comparison-grid">
+            <div class="comparison-card">
+                <div class="comparison-label">New Hosts</div>
+                <div class="comparison-value positive" id="cmpNewHosts">0</div>
+            </div>
+            <div class="comparison-card">
+                <div class="comparison-label">Removed Hosts</div>
+                <div class="comparison-value negative" id="cmpRemovedHosts">0</div>
+            </div>
+            <div class="comparison-card">
+                <div class="comparison-label">New Ports</div>
+                <div class="comparison-value positive" id="cmpNewPorts">0</div>
+            </div>
+            <div class="comparison-card">
+                <div class="comparison-label">Removed Ports</div>
+                <div class="comparison-value negative" id="cmpRemovedPorts">0</div>
+            </div>
+            <div class="comparison-card">
+                <div class="comparison-label">New Findings</div>
+                <div class="comparison-value positive" id="cmpNewVulns">0</div>
+            </div>
+            <div class="comparison-card">
+                <div class="comparison-label">Removed Findings</div>
+                <div class="comparison-value negative" id="cmpRemovedVulns">0</div>
+            </div>
+        </div>
+
+        <!-- Statistics Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Hosts</div>
+                <div class="stat-value" id="statTotalHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Resolved Hosts</div>
+                <div class="stat-value" id="statResolvedHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">HTTP Hosts</div>
+                <div class="stat-value" id="statHttpHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">WAF Protected</div>
+                <div class="stat-value" id="statWafHosts">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Vulnerabilities</div>
+                <div class="stat-value" id="statVulnerabilities">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Non-HTTP Services</div>
+                <div class="stat-value" id="statNonHttpServices">0</div>
+            </div>
+            <div class="stat-card ports">
+                <div class="stat-label">Open Ports</div>
+                <div class="stat-value" id="statOpenPorts">0</div>
+            </div>
+            <div class="stat-card services">
+                <div class="stat-label">Fingerprinted Services</div>
+                <div class="stat-value" id="statFingerprintedServices">0</div>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="nav-tabs">
+            <div class="nav-tab active" data-tab="executive">Executive Summary</div>
+            <div class="nav-tab" data-tab="hosts">Hosts</div>
+            <div class="nav-tab" data-tab="vulnerabilities">Vulnerabilities</div>
+            <div class="nav-tab" data-tab="cves">CVEs</div>
+            <div class="nav-tab" data-tab="apisec">API Security</div>
+            <div class="nav-tab" data-tab="ports">Ports</div>
+            <div class="nav-tab" data-tab="changes">Changes</div>
+            <div class="nav-tab" data-tab="dirsearch">Directories</div>
+            <div class="nav-tab" data-tab="modules">Modules</div>
+        </div>
+
+        <!-- EXECUTIVE SUMMARY TAB -->
+        <div id="executive" class="tab-content active">
+            <div class="exec-kpi-grid" id="execKpis">
+                <div class="exec-kpi" id="kpiRiskScore">
+                    <div class="kpi-value" id="execRiskScore">--</div>
+                    <div class="kpi-label">Risk Score</div>
+                    <div class="kpi-sub" id="execGrade"></div>
+                </div>
+                <div class="exec-kpi">
+                    <div class="kpi-value" style="color:#ff0055;" id="execCritical">0</div>
+                    <div class="kpi-label">Critical Findings</div>
+                </div>
+                <div class="exec-kpi">
+                    <div class="kpi-value" style="color:#00d4ff;" id="execAssets">0</div>
+                    <div class="kpi-label">Internet-Facing Assets</div>
+                </div>
+                <div class="exec-kpi">
+                    <div class="kpi-value" id="execWafCoverage">0%</div>
+                    <div class="kpi-label">WAF Coverage</div>
+                    <div class="kpi-sub" id="execWafDetail"></div>
+                </div>
+                <div class="exec-kpi">
+                    <div class="kpi-value" id="execDelta">--</div>
+                    <div class="kpi-label">Change Since Last Scan</div>
+                    <div class="kpi-sub" id="execDeltaDetail"></div>
+                </div>
+            </div>
+
+            <h3 style="color:#00d4ff; margin-bottom:10px;">Findings by Severity</h3>
+            <div class="severity-bar" id="execSeverityBar"></div>
+            <div class="severity-legend" id="execSeverityLegend"></div>
+
+            <h3 style="color:#ff6b6b; margin: 20px 0 10px;">Top Remediation Priorities</h3>
+            <ul class="priority-list" id="execPriorities">
+                <li class="loading">Loading...</li>
+            </ul>
+
+            <div class="trend-container">
+                <h3 style="color:#00d4ff; margin-bottom:15px;">Risk Score Trend</h3>
+                <div class="trend-bars" id="execTrendBars"></div>
+            </div>
+        </div>
+
+        <!-- HOSTS TAB -->
+        <div id="hosts" class="tab-content">
+            <div>
+                <input type="text" id="searchBox" class="search-box" placeholder="Search hosts by name or IP...">
+            </div>
+            <div class="filter-buttons">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="resolved">Resolved</button>
+                <button class="filter-btn" data-filter="http">HTTP</button>
+                <button class="filter-btn" data-filter="waf">WAF Protected</button>
+                <button class="filter-btn" data-filter="cdn">CDN</button>
+                <button class="filter-btn" data-filter="dangling">Dangling</button>
+                <button class="filter-btn" data-filter="api">API</button>
+            </div>
+            <div class="table-container">
+                <table id="hostsTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="risk_score">Risk <span class="help-tip">?<span class="help-text">0–100 risk score based on vulnerabilities, exposed services, and missing protections</span></span></th>
+                            <th data-sort="host">Host</th>
+                            <th data-sort="ip">IP Address</th>
+                            <th data-sort="http_status">HTTP Status <span class="help-tip">?<span class="help-text">HTTP response code returned by the host (e.g. 200 OK, 403 Forbidden, 301 Redirect)</span></span></th>
+                            <th>WAF <span class="help-tip">?<span class="help-text">Web Application Firewall detected in front of the host (e.g. Cloudflare, Akamai)</span></span></th>
+                            <th>CDN <span class="help-tip">?<span class="help-text">Content Delivery Network — host is served through a CDN provider</span></span></th>
+                            <th data-sort="security_score">Sec Headers <span class="help-tip">?<span class="help-text">Count of 6 standard security headers present: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy</span></span></th>
+                            <th data-sort="ssl_dangling">Dangling <span class="help-tip">?<span class="help-text">SSL cert mismatch — the certificate CN/SANs don't match the host's root domain, indicating a potentially hijackable subdomain</span></span></th>
+                            <th>Server <span class="help-tip">?<span class="help-text">Server banner returned in HTTP response headers (e.g. nginx, cloudflare, Apache)</span></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="hostsTableBody">
+                        <tr><td colspan="9" class="loading">Loading hosts...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- VULNERABILITIES TAB -->
+        <div id="vulnerabilities" class="tab-content">
+            <ul class="vuln-list" id="vulnsList">
+                <li class="loading">Loading vulnerabilities...</li>
+            </ul>
+        </div>
+
+        <!-- CVEs TAB -->
+        <div id="cves" class="tab-content">
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:20px;">
+                <div class="stat-card">
+                    <div class="stat-label">Unique CVEs</div>
+                    <div class="stat-value" id="cveTotal">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Critical CVEs</div>
+                    <div class="stat-value" style="color:#ff0055;" id="cveCritical">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Most Widespread</div>
+                    <div class="stat-value" style="font-size:1em; color:#ffa500;" id="cveMostWidespread">--</div>
+                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>CVE ID</th>
+                            <th>Severity</th>
+                            <th>Affected Hosts</th>
+                            <th>Template</th>
+                            <th>CWE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cvesTableBody">
+                        <tr><td colspan="5" class="loading">Loading CVEs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- API SECURITY TAB -->
+        <div id="apisec" class="tab-content">
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:20px;">
+                <div class="stat-card">
+                    <div class="stat-label">API Findings</div>
+                    <div class="stat-value" id="apisecTotal">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Autoswagger <span style="font-size:0.7em;color:#888;">auth/authz</span></div>
+                    <div class="stat-value" style="color:#00d4ff;" id="apisecAutoswagger">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">RESTler <span style="font-size:0.7em;color:#888;">robustness</span></div>
+                    <div class="stat-value" style="color:#c586ff;" id="apisecRestler">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Unique Endpoints</div>
+                    <div class="stat-value" style="color:#ffa500;" id="apisecEndpoints">0</div>
+                </div>
+            </div>
+
+            <div class="filter-bar" style="margin-bottom:15px;">
+                <button class="apisec-filter-btn filter-btn active" data-tool="all">All Tools</button>
+                <button class="apisec-filter-btn filter-btn" data-tool="autoswagger">Autoswagger (auth/authz)</button>
+                <button class="apisec-filter-btn filter-btn" data-tool="restler">RESTler (robustness)</button>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Endpoint <span class="help-tip">?<span class="help-text">HTTP method + normalized path. Concrete IDs (e.g. /users/123) are collapsed to /users/{id} so the same issue on different objects appears once.</span></span></th>
+                            <th>Issue <span class="help-tip">?<span class="help-text">Normalized issue class mapped from each tool's native finding type into a shared taxonomy</span></span></th>
+                            <th>Category</th>
+                            <th>Severity</th>
+                            <th>Tool <span class="help-tip">?<span class="help-text">Which scanner reported this. Autoswagger owns authentication/authorization; RESTler owns robustness/input-handling. A finding seen by both shows both tags.</span></span></th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="apisecTableBody">
+                        <tr><td colspan="6" class="loading">Loading API security findings...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- PORTS TAB -->
+        <div id="ports" class="tab-content">
+            <div class="warning-banner" id="portScanWarning">
+                Port scan failed (naabu crashed due to thread limits). Port data is incomplete. Re-run with PORT_SCAN_MODE=fast.
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Port</th>
+                            <th>Host Count</th>
+                            <th>Services</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portsTableBody">
+                        <tr><td colspan="3" class="loading">Loading ports...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- CHANGES TAB -->
+        <div id="changes" class="tab-content">
+            <div id="changesContent">
+                <p class="loading">Loading changes...</p>
+            </div>
+        </div>
+
+        <!-- DIRSEARCH TAB -->
+        <div id="dirsearch" class="tab-content">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>URL</th>
+                            <th>Status Code</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dirsearchTableBody">
+                        <tr><td colspan="2" class="loading">Loading directories...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- MODULES TAB -->
+        <div id="modules" class="tab-content">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Module</th>
+                            <th>Status</th>
+                            <th>Data Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modulesTableBody">
+                        <tr><td colspan="3" class="loading">Loading modules...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let currentTarget = null;
+        let currentTargetKey = null;
+        let currentFilter = 'all';
+        let hostSortField = 'risk_score';
+        let hostSortAsc = false;
+        let cachedHosts = [];
+
+        function getApiUrl(endpoint) {
+            const params = new URLSearchParams();
+            if (currentTarget) params.append('target', currentTarget);
+            const separator = endpoint.includes('?') ? '&' : '?';
+            return API_BASE + endpoint + (currentTarget ? separator + params.toString() : '');
+        }
+
+        function severityColor(sev) {
+            return {critical:'#ff0055', high:'#ff6b6b', medium:'#ff9500', low:'#ffd700', info:'#00d4ff'}[sev] || '#888';
+        }
+
+        function riskBandClass(band) {
+            return 'risk-' + (band || 'low');
+        }
+
+        function gradeClass(grade) {
+            return 'grade-' + (grade || 'C');
+        }
+
+        // =====================================================================
+        // DATA LOADING
+        // =====================================================================
+
+        async function loadTargets() {
+            try {
+                const previousTargetKey = currentTargetKey;
+                const previousScanId = currentTarget;
+                const response = await fetch(API_BASE + '/api/targets');
+                const targets = await response.json();
+
+                const dropdown = document.getElementById('targetDropdown');
+                dropdown.innerHTML = '';
+
+                if (targets.length === 0) {
+                    dropdown.innerHTML = '<option value="">No scans available</option>';
+                    return;
+                }
+
+                targets.forEach(function(target) {
+                    const option = document.createElement('option');
+                    option.value = target.id;
+                    const revisions = target.revision_count ? ' - ' + target.revision_count + ' scans' : '';
+                    option.textContent = target.name + revisions + ' - ' + target.status;
+                    dropdown.appendChild(option);
+                });
+
+                const selected = targets.find(t => t.id === previousTargetKey) || targets[0];
+                currentTargetKey = selected.id;
+                currentTarget = previousTargetKey === selected.id && previousScanId
+                    ? previousScanId
+                    : selected.latest_scan_id || selected.scan_id || selected.id;
+                dropdown.value = currentTargetKey;
+                await loadRevisions(false);
+            } catch (error) {
+                console.error('Error loading targets:', error);
+            }
+        }
+
+        async function loadRevisions(forceLatest) {
+            const dropdown = document.getElementById('revisionDropdown');
+            if (!currentTargetKey) { dropdown.innerHTML = '<option value="">No revisions</option>'; return; }
+
+            try {
+                const response = await fetch(API_BASE + '/api/targets/history?target=' + encodeURIComponent(currentTargetKey));
+                const revisions = await response.json();
+                dropdown.innerHTML = '';
+                if (!revisions || revisions.length === 0) { dropdown.innerHTML = '<option value="">No revisions</option>'; return; }
+
+                const hasCurrent = revisions.some(r => r.id === currentTarget);
+                if (forceLatest || !hasCurrent) currentTarget = revisions[0].id;
+
+                revisions.forEach(function(revision, index) {
+                    const option = document.createElement('option');
+                    option.value = revision.id;
+                    const label = revision.start_time ? new Date(revision.start_time).toLocaleString() : revision.id;
+                    option.textContent = (index === 0 ? 'Latest' : 'Revision') + ' - ' + label + ' - ' + revision.status;
+                    dropdown.appendChild(option);
+                });
+                dropdown.value = currentTarget;
+            } catch (error) {
+                console.error('Error loading revisions:', error);
+            }
+        }
+
+        async function loadStatistics() {
+            try {
+                const response = await fetch(getApiUrl('/api/statistics'));
+                const stats = await response.json();
+
+                document.getElementById('statTotalHosts').textContent = stats.total_hosts || 0;
+                document.getElementById('statResolvedHosts').textContent = stats.resolved_hosts || 0;
+                document.getElementById('statHttpHosts').textContent = stats.http_hosts || 0;
+                document.getElementById('statWafHosts').textContent = stats.waf_hosts || 0;
+                document.getElementById('statVulnerabilities').textContent = stats.total_vulnerabilities || 0;
+                document.getElementById('statNonHttpServices').textContent = stats.non_http_services || 0;
+                document.getElementById('statOpenPorts').textContent = stats.open_ports || 0;
+                document.getElementById('statFingerprintedServices').textContent = stats.services_fingerprinted || 0;
+
+                // Port scan crash banner
+                const portWarn = document.getElementById('portScanWarning');
+                if (stats.port_scan_status === 'crashed') {
+                    portWarn.style.display = 'block';
+                } else {
+                    portWarn.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error loading statistics:', error);
+            }
+        }
+
+        async function loadStatus() {
+            try {
+                const response = await fetch(getApiUrl('/api/status'));
+                const status = await response.json();
+
+                const statusDot = document.getElementById('statusDot');
+                statusDot.className = 'status-dot ' + (status.status || 'no_data');
+
+                let statusText = 'Status: ' + (status.status || 'Unknown');
+                if (status.target) statusText += ' | Target: ' + status.target;
+                if (status.duration) statusText += ' | Duration: ' + status.duration + 's';
+                document.getElementById('statusText').textContent = statusText;
+
+                if (status.start_time) {
+                    document.getElementById('scanInfo').textContent = 'Started: ' + new Date(status.start_time).toLocaleString();
+                }
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+
+        async function loadComparison() {
+            try {
+                const response = await fetch(getApiUrl('/api/compare'));
+                const comparison = await response.json();
+                const summary = comparison.summary || {};
+
+                document.getElementById('cmpNewHosts').textContent = summary.new_hosts || 0;
+                document.getElementById('cmpRemovedHosts').textContent = summary.removed_hosts || 0;
+                document.getElementById('cmpNewPorts').textContent = summary.new_ports || 0;
+                document.getElementById('cmpRemovedPorts').textContent = summary.removed_ports || 0;
+                document.getElementById('cmpNewVulns').textContent = summary.new_vulnerabilities || 0;
+                document.getElementById('cmpRemovedVulns').textContent = summary.removed_vulnerabilities || 0;
+            } catch (error) {
+                console.error('Error loading comparison:', error);
+            }
+        }
+
+        // ----- Executive Summary -----
+        async function loadExecutive() {
+            try {
+                const response = await fetch(getApiUrl('/api/executive'));
+                const exec = await response.json();
+                if (!exec || !exec.org_score && exec.org_score !== 0) return;
+
+                // Risk score + grade
+                const scoreEl = document.getElementById('execRiskScore');
+                scoreEl.textContent = exec.org_score;
+                const gradeEl = document.getElementById('execGrade');
+                gradeEl.textContent = 'Grade: ' + exec.grade;
+                const kpiCard = document.getElementById('kpiRiskScore');
+                kpiCard.className = 'exec-kpi ' + gradeClass(exec.grade);
+                scoreEl.className = 'kpi-value ' + gradeClass(exec.grade);
+
+                // Critical findings
+                document.getElementById('execCritical').textContent =
+                    (exec.findings.by_severity.critical || 0) + (exec.findings.secrets || 0);
+
+                // Internet-facing assets
+                document.getElementById('execAssets').textContent = exec.exposure.internet_facing_http || 0;
+
+                // WAF coverage
+                const wafPct = exec.exposure.waf_coverage_pct || 0;
+                const wafEl = document.getElementById('execWafCoverage');
+                wafEl.textContent = wafPct + '%';
+                wafEl.style.color = wafPct >= 80 ? '#00ff88' : wafPct >= 50 ? '#ffd700' : '#ff6b6b';
+                document.getElementById('execWafDetail').textContent =
+                    exec.exposure.waf_covered + ' covered / ' + exec.exposure.waf_uncovered + ' exposed';
+
+                // Delta
+                const delta = exec.delta || {};
+                const deltaEl = document.getElementById('execDelta');
+                const totalNew = (delta.new_hosts || 0) + (delta.new_ports || 0) + (delta.new_vulnerabilities || 0);
+                const totalRemoved = (delta.removed_hosts || 0) + (delta.removed_ports || 0) + (delta.removed_vulnerabilities || 0);
+                if (!exec.has_baseline) {
+                    deltaEl.textContent = 'First Scan';
+                    deltaEl.style.color = '#888';
+                } else if (totalNew > totalRemoved) {
+                    deltaEl.textContent = '+' + (totalNew - totalRemoved);
+                    deltaEl.style.color = '#ff6b6b';
+                } else if (totalRemoved > totalNew) {
+                    deltaEl.textContent = '-' + (totalRemoved - totalNew);
+                    deltaEl.style.color = '#00ff88';
+                } else {
+                    deltaEl.textContent = 'No Change';
+                    deltaEl.style.color = '#888';
+                }
+                document.getElementById('execDeltaDetail').textContent =
+                    '+' + (delta.new_vulnerabilities || 0) + ' findings, +' + (delta.new_hosts || 0) + ' hosts';
+
+                // Severity bar
+                const sev = exec.findings.by_severity || {};
+                const sevTotal = Object.values(sev).reduce((a, b) => a + b, 0) || 1;
+                const barEl = document.getElementById('execSeverityBar');
+                barEl.innerHTML = '';
+                ['critical', 'high', 'medium', 'low', 'info'].forEach(function(s) {
+                    if (sev[s]) {
+                        const seg = document.createElement('div');
+                        seg.className = 'seg-' + s;
+                        seg.style.width = ((sev[s] / sevTotal) * 100) + '%';
+                        seg.title = s + ': ' + sev[s];
+                        barEl.appendChild(seg);
+                    }
+                });
+
+                const legendEl = document.getElementById('execSeverityLegend');
+                legendEl.innerHTML = '';
+                ['critical', 'high', 'medium', 'low', 'info'].forEach(function(s) {
+                    const item = document.createElement('span');
+                    item.className = 'leg-item';
+                    item.innerHTML = '<span class="leg-dot" style="background:' + severityColor(s) + '"></span>' +
+                        s.charAt(0).toUpperCase() + s.slice(1) + ': ' + (sev[s] || 0);
+                    legendEl.appendChild(item);
+                });
+
+                // Secrets + sensitive services
+                if (exec.findings.secrets > 0 || exec.findings.sensitive_services > 0) {
+                    const extraLeg = document.createElement('span');
+                    extraLeg.className = 'leg-item';
+                    extraLeg.innerHTML = '<span class="leg-dot" style="background:#ff0055"></span>Secrets: ' + exec.findings.secrets +
+                        ' | Sensitive Services: ' + exec.findings.sensitive_services;
+                    legendEl.appendChild(extraLeg);
+                }
+
+                // Port scan status warning
+                if (exec.port_scan_status === 'crashed') {
+                    const warn = document.createElement('span');
+                    warn.className = 'leg-item';
+                    warn.innerHTML = '<span class="leg-dot" style="background:#ffa500"></span>' +
+                        '<span style="color:#ffa500;">Port scan crashed - data incomplete</span>';
+                    legendEl.appendChild(warn);
+                }
+
+                // Top priorities
+                const priList = document.getElementById('execPriorities');
+                priList.innerHTML = '';
+                const priorities = exec.top_priorities || [];
+                if (priorities.length === 0) {
+                    priList.innerHTML = '<li style="color:#00ff88; padding:12px;">No critical priorities identified</li>';
+                } else {
+                    priorities.forEach(function(p, i) {
+                        const li = document.createElement('li');
+                        li.className = 'priority-item';
+                        li.style.borderLeftColor = severityColor(p.severity);
+                        li.innerHTML =
+                            '<span style="color:' + severityColor(p.severity) + '; font-weight:bold; min-width:24px;">#' + (i + 1) + '</span>' +
+                            '<div class="pri-text">' +
+                            '<strong>' + (p.template || p.source || 'Unknown') + '</strong>' +
+                            '<div class="pri-host">' + (p.host || '') + '</div>' +
+                            (p.remediation ? '<div style="color:#666; font-size:0.82em; margin-top:4px;">' + p.remediation.substring(0, 120) + '</div>' : '') +
+                            '</div>' +
+                            '<span class="badge" style="background:' + severityColor(p.severity) + '; color:#fff;">' + (p.severity || '').toUpperCase() + '</span>';
+                        priList.appendChild(li);
+                    });
+                }
+
+                // Trend
+                const trendBars = document.getElementById('execTrendBars');
+                trendBars.innerHTML = '';
+                const trend = (exec.trend || []).slice().reverse();
+                if (trend.length > 0) {
+                    const maxScore = Math.max(...trend.map(t => t.org_score), 10);
+                    trend.forEach(function(t) {
+                        const bar = document.createElement('div');
+                        bar.className = 'trend-bar';
+                        const pct = Math.max((t.org_score / maxScore) * 100, 4);
+                        bar.style.height = pct + '%';
+                        const color = t.org_score >= 60 ? '#ff0055' : t.org_score >= 40 ? '#ff9500' : t.org_score >= 20 ? '#ffd700' : '#00ff88';
+                        bar.style.background = color;
+                        const dateLabel = t.start_time ? new Date(t.start_time).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : t.scan_id.slice(-10);
+                        bar.innerHTML = '<span class="trend-score" style="color:' + color + '">' + t.org_score + '</span>' +
+                            '<span class="trend-label">' + dateLabel + '</span>';
+                        bar.title = 'Score: ' + t.org_score + ' (Grade: ' + t.grade + ') - ' + t.vuln_count + ' vulns';
+                        trendBars.appendChild(bar);
+                    });
+                } else {
+                    trendBars.innerHTML = '<div style="color:#888; padding:20px;">No historical data yet</div>';
+                }
+            } catch (error) {
+                console.error('Error loading executive summary:', error);
+            }
+        }
+
+        // ----- Hosts -----
+        function renderHostsTable(hosts) {
+            const tbody = document.getElementById('hostsTableBody');
+            tbody.innerHTML = '';
+
+            if (!hosts || hosts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#888;">No hosts found</td></tr>';
+                return;
+            }
+
+            hosts.forEach(function(host) {
+                const tr = document.createElement('tr');
+
+                let statusBadgeClass = 'badge-info';
+                let statusText = 'N/A';
+                if (host.http_status == 200) { statusBadgeClass = 'badge-success'; statusText = '200 OK'; }
+                else if (host.http_status) { statusBadgeClass = 'badge-warning'; statusText = host.http_status; }
+                else if (host.resolved) { statusBadgeClass = 'badge-info'; statusText = 'Resolved'; }
+
+                const wafText = host.waf_vendor && host.waf_vendor !== 'none' ? host.waf_vendor : '-';
+                const cdnText = host.cdn ? '<span class="badge badge-warning">CDN</span>' : '-';
+
+                const riskScore = host.risk_score || 0;
+                const riskBand = host.risk_band || 'low';
+
+                let danglingHtml = '-';
+                if (host.ssl_checked) {
+                    if (host.ssl_dangling) {
+                        const tip = host.ssl_cert_cn ? 'Cert CN: ' + host.ssl_cert_cn : 'No cert returned';
+                        danglingHtml = '<span class="badge badge-danger" title="' + tip + '">YES</span>';
+                    } else {
+                        danglingHtml = 'NO';
+                    }
+                }
+
+                tr.innerHTML =
+                    '<td><span class="badge ' + riskBandClass(riskBand) + '">' + riskScore + '</span></td>' +
+                    '<td style="color: #00d4ff; font-weight: bold;">' + host.host + (host.is_api ? ' <span class="badge badge-info" title="' + (host.api_signals || []).join(', ') + '" style="font-size:0.7em;margin-left:4px;">API</span>' : '') + '</td>' +
+                    '<td>' + (host.ip || '-') + '</td>' +
+                    '<td><span class="badge ' + statusBadgeClass + '">' + statusText + '</span></td>' +
+                    '<td>' + (wafText !== '-' ? '<span class="badge badge-warning">' + wafText + '</span>' : '-') + '</td>' +
+                    '<td>' + cdnText + '</td>' +
+                    '<td>' + (host.security_score || 0) + '/6</td>' +
+                    '<td>' + danglingHtml + '</td>' +
+                    '<td style="font-size: 0.85em; color: #aaa;">' + (host.server_banner || '-') + '</td>';
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function loadHosts() {
+            try {
+                const query = document.getElementById('searchBox').value.trim();
+                let url = getApiUrl('/api/hosts/filter/' + currentFilter);
+                if (query) {
+                    const sep = url.includes('?') ? '&' : '?';
+                    url += sep + 'q=' + encodeURIComponent(query);
+                }
+                const response = await fetch(url);
+                cachedHosts = await response.json();
+                sortAndRenderHosts();
+            } catch (error) {
+                console.error('Error loading hosts:', error);
+                document.getElementById('hostsTableBody').innerHTML =
+                    '<tr><td colspan="9" class="error-message">Error loading hosts: ' + error.message + '</td></tr>';
+            }
+        }
+
+        function sortAndRenderHosts() {
+            const sorted = [...cachedHosts].sort(function(a, b) {
+                let va = a[hostSortField] || 0;
+                let vb = b[hostSortField] || 0;
+                if (typeof va === 'string') va = va.toLowerCase();
+                if (typeof vb === 'string') vb = vb.toLowerCase();
+                if (va < vb) return hostSortAsc ? -1 : 1;
+                if (va > vb) return hostSortAsc ? 1 : -1;
+                return 0;
+            });
+            renderHostsTable(sorted);
+        }
+
+        // ----- Vulnerabilities -----
+        async function loadVulnerabilities() {
+            try {
+                const response = await fetch(getApiUrl('/api/vulnerabilities'));
+                const vulns = await response.json();
+
+                const list = document.getElementById('vulnsList');
+                list.innerHTML = '';
+
+                if (!vulns || vulns.length === 0) {
+                    list.innerHTML = '<li style="color:#00ff88;text-align:center;padding:20px;">No vulnerabilities found</li>';
+                    return;
+                }
+
+                vulns.forEach(function(vuln) {
+                    const color = severityColor(vuln.severity);
+                    const li = document.createElement('li');
+                    li.className = 'vuln-item';
+                    li.style.borderLeftColor = color;
+
+                    const title = vuln.template || vuln.source || 'Unknown';
+                    const cveTag = vuln.cve_id ? ' <a href="https://nvd.nist.gov/vuln/detail/' + vuln.cve_id + '" target="_blank" style="color:#ffd700;">[' + vuln.cve_id + ']</a>' : '';
+
+                    li.innerHTML =
+                        '<div class="vuln-header">' +
+                        '<span class="vuln-title">' + title + cveTag + '</span>' +
+                        '<span class="badge" style="background:' + color + '; color: white;">' + (vuln.severity || 'info').toUpperCase() + '</span>' +
+                        '</div>' +
+                        '<div class="vuln-details">' +
+                        '<div><strong>Host:</strong> ' + (vuln.host || 'Unknown') + '</div>' +
+                        '<div><strong>URL:</strong> ' + (vuln.url || 'N/A') + '</div>' +
+                        (vuln.impact ? '<div style="margin-top:8px; padding:8px; background:rgba(0,0,0,0.2); border-radius:3px;"><strong style="color:#ff6b6b;">Impact:</strong><br>' + vuln.impact.substring(0, 200) + '</div>' : '') +
+                        (vuln.remediation ? '<div style="margin-top:8px; padding:8px; background:rgba(0,255,136,0.1); border-radius:3px;"><strong style="color:#00ff88;">Remediation:</strong><br>' + vuln.remediation.substring(0, 150) + '</div>' : '') +
+                        '</div>';
+
+                    list.appendChild(li);
+                });
+            } catch (error) {
+                console.error('Error loading vulnerabilities:', error);
+            }
+        }
+
+        // ----- CVEs -----
+        async function loadCves() {
+            try {
+                const response = await fetch(getApiUrl('/api/cves'));
+                const cves = await response.json();
+
+                document.getElementById('cveTotal').textContent = cves.length;
+                document.getElementById('cveCritical').textContent = cves.filter(c => c.severity === 'critical').length;
+
+                const mostWidespread = cves.reduce((best, c) => (!best || c.affected_hosts.length > best.affected_hosts.length) ? c : best, null);
+                document.getElementById('cveMostWidespread').textContent = mostWidespread ? mostWidespread.cve_id + ' (' + mostWidespread.affected_hosts.length + ' hosts)' : '--';
+
+                const tbody = document.getElementById('cvesTableBody');
+                tbody.innerHTML = '';
+
+                if (cves.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No CVEs found in scan results</td></tr>';
+                    return;
+                }
+
+                cves.forEach(function(cve) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML =
+                        '<td><a href="https://nvd.nist.gov/vuln/detail/' + cve.cve_id + '" target="_blank" style="color:#ffd700; text-decoration:none;">' + cve.cve_id + '</a></td>' +
+                        '<td><span class="badge" style="background:' + severityColor(cve.severity) + '; color:#fff;">' + cve.severity.toUpperCase() + '</span></td>' +
+                        '<td>' + cve.affected_hosts.length + ' <span style="color:#888; font-size:0.8em;">(' + cve.affected_hosts.slice(0, 3).join(', ') + (cve.affected_hosts.length > 3 ? '...' : '') + ')</span></td>' +
+                        '<td style="color:#aaa;">' + (cve.template || '--') + '</td>' +
+                        '<td style="color:#888; font-size:0.85em;">' + (cve.cwe_ids.length > 0 ? cve.cwe_ids.join(', ') : '--') + '</td>';
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error loading CVEs:', error);
+            }
+        }
+
+        // ----- API Security (Autoswagger + RESTler) -----
+        let apisecFindings = [];
+        let apisecTool = 'all';
+
+        async function loadApiSecurity() {
+            try {
+                const response = await fetch(getApiUrl('/api/api-security'));
+                const data = await response.json();
+                const s = data.summary || {};
+                apisecFindings = data.findings || [];
+
+                document.getElementById('apisecTotal').textContent = s.total || 0;
+                document.getElementById('apisecAutoswagger').textContent = s.autoswagger || 0;
+                document.getElementById('apisecRestler').textContent = s.restler || 0;
+                document.getElementById('apisecEndpoints').textContent = s.unique_endpoints || 0;
+
+                renderApiSecurity();
+            } catch (error) {
+                console.error('Error loading API security:', error);
+            }
+        }
+
+        function toolBadge(tool) {
+            const color = tool === 'autoswagger' ? '#00d4ff' : (tool === 'restler' ? '#c586ff' : '#888');
+            return '<span class="badge" style="background:' + color + '; color:#0a0a0a; margin-right:4px;">' + tool + '</span>';
+        }
+
+        function renderApiSecurity() {
+            const tbody = document.getElementById('apisecTableBody');
+            tbody.innerHTML = '';
+
+            const rows = apisecFindings.filter(function(f) {
+                if (apisecTool === 'all') return true;
+                return (f.tools || [f.tool]).includes(apisecTool);
+            });
+
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">No API security findings' +
+                    (apisecTool !== 'all' ? ' for ' + apisecTool : '') + '</td></tr>';
+                return;
+            }
+
+            rows.forEach(function(f) {
+                const tools = f.tools || [f.tool];
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td style="color:#00d4ff; font-family:monospace;">' + (f.endpoint || (f.method + ' ' + f.path)) + '</td>' +
+                    '<td>' + (f.issue_class || '-').replace(/_/g, ' ') + '</td>' +
+                    '<td style="color:#aaa;">' + (f.category || '-') + '</td>' +
+                    '<td><span class="badge" style="background:' + severityColor(f.severity) + '; color:#fff;">' + (f.severity || 'info').toUpperCase() + '</span></td>' +
+                    '<td>' + tools.map(toolBadge).join('') + '</td>' +
+                    '<td style="font-size:0.82em; color:#bbb;">' + (f.evidence || '-').substring(0, 160) + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ----- Ports -----
+        async function loadPorts() {
+            try {
+                const response = await fetch(getApiUrl('/api/ports'));
+                const ports = await response.json();
+
+                const tbody = document.getElementById('portsTableBody');
+                tbody.innerHTML = '';
+
+                if (!ports || ports.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#888;">No open ports found</td></tr>';
+                    return;
+                }
+
+                ports.forEach(function(portData, index) {
+                    const mainTr = document.createElement('tr');
+                    mainTr.style.cursor = 'pointer';
+                    const detailsId = 'port-details-' + index;
+
+                    mainTr.innerHTML =
+                        '<td><strong style="color:#ffd700;font-size:1.2em;">' + portData.port + '</strong></td>' +
+                        '<td>' + portData.host_count + '</td>' +
+                        '<td style="color:#888;font-size:0.9em;">Click to view hosts <span style="font-size:12px;margin-left:5px;">&#x25BC;</span></td>';
+
+                    const detailsTr = document.createElement('tr');
+                    detailsTr.id = detailsId;
+                    detailsTr.style.display = 'none';
+                    detailsTr.style.backgroundColor = 'rgba(0,0,0,0.1)';
+
+                    const hostsHtml = portData.hosts.map(function(host) {
+                        return '<div style="display:inline-block; margin:4px; padding:8px 12px; background:rgba(0,0,0,0.3); border-radius:4px; font-size:0.85em; border:1px solid rgba(255,255,255,0.05);">' +
+                            '<strong style="color:#00d4ff;">' + host.host + '</strong> ' +
+                            '<span style="color:#888;margin-left:5px;">(' + host.ip + ')</span> ' +
+                            '<span style="color:#aaa;margin-left:5px;">[' + (host.service || 'Unknown') + ']</span>' +
+                            '</div>';
+                    }).join('');
+
+                    detailsTr.innerHTML = '<td colspan="3" style="padding:10px;">' + hostsHtml + '</td>';
+
+                    mainTr.addEventListener('click', function() {
+                        const details = document.getElementById(detailsId);
+                        details.style.display = details.style.display === 'none' ? 'table-row' : 'none';
+                    });
+
+                    tbody.appendChild(mainTr);
+                    tbody.appendChild(detailsTr);
+                });
+            } catch (error) {
+                console.error('Error loading ports:', error);
+            }
+        }
+
+        // ----- Changes -----
+        async function loadChanges() {
+            try {
+                const response = await fetch(getApiUrl('/api/compare'));
+                const comparison = await response.json();
+
+                const container = document.getElementById('changesContent');
+                container.innerHTML = '';
+
+                if (!comparison.has_baseline) {
+                    container.innerHTML = '<div style="text-align:center; color:#888; padding:40px;">This is the first scan for this target. Changes will appear after the next scan.</div>';
+                    return;
+                }
+
+                const sections = [
+                    { title: 'New Hosts', items: comparison.hosts?.added || [], type: 'added', format: h => h },
+                    { title: 'Removed Hosts', items: comparison.hosts?.removed || [], type: 'removed', format: h => h },
+                    { title: 'New Ports', items: comparison.ports?.added || [], type: 'added', format: p => p },
+                    { title: 'Removed Ports', items: comparison.ports?.removed || [], type: 'removed', format: p => p },
+                    { title: 'New Vulnerabilities', items: comparison.vulnerabilities?.added || [], type: 'added', format: v => (v.template || v.source || 'Unknown') + ' on ' + (v.host || 'Unknown') + ' [' + (v.severity || 'info').toUpperCase() + ']' },
+                    { title: 'Resolved Vulnerabilities', items: comparison.vulnerabilities?.removed || [], type: 'removed', format: v => (v.template || v.source || 'Unknown') + ' on ' + (v.host || 'Unknown') + ' [' + (v.severity || 'info').toUpperCase() + ']' }
+                ];
+
+                let hasChanges = false;
+                sections.forEach(function(sec) {
+                    if (sec.items.length === 0) return;
+                    hasChanges = true;
+                    const div = document.createElement('div');
+                    div.className = 'change-section';
+                    div.innerHTML = '<h3>' + sec.title + ' (' + sec.items.length + ')</h3>';
+                    const ul = document.createElement('ul');
+                    ul.className = 'change-list';
+                    sec.items.slice(0, 50).forEach(function(item) {
+                        const li = document.createElement('li');
+                        li.className = sec.type === 'added' ? 'change-added' : 'change-removed';
+                        li.textContent = (sec.type === 'added' ? '+ ' : '- ') + sec.format(item);
+                        ul.appendChild(li);
+                    });
+                    if (sec.items.length > 50) {
+                        const li = document.createElement('li');
+                        li.style.color = '#888';
+                        li.textContent = '... and ' + (sec.items.length - 50) + ' more';
+                        ul.appendChild(li);
+                    }
+                    div.appendChild(ul);
+                    container.appendChild(div);
+                });
+
+                if (!hasChanges) {
+                    container.innerHTML = '<div style="text-align:center; color:#00ff88; padding:40px;">No changes detected between scans</div>';
+                }
+            } catch (error) {
+                console.error('Error loading changes:', error);
+            }
+        }
+
+        // ----- Modules -----
+        async function loadModules() {
+            try {
+                const response = await fetch(getApiUrl('/api/modules'));
+                const modules = await response.json();
+
+                const tbody = document.getElementById('modulesTableBody');
+                tbody.innerHTML = '';
+
+                Object.entries(modules).forEach(function([key, module]) {
+                    const tr = document.createElement('tr');
+                    const statusBadge = module.completed
+                        ? '<span class="badge badge-success">Completed</span>'
+                        : '<span class="badge badge-info">Pending</span>';
+                    tr.innerHTML =
+                        '<td style="color: #00d4ff;">' + module.name + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
+                        '<td>' + (module.data_count || 0) + ' items</td>';
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error loading modules:', error);
+            }
+        }
+
+        // ----- Dirsearch -----
+        async function loadDirsearch() {
+            try {
+                const response = await fetch(getApiUrl('/api/dirsearch'));
+                const directories = await response.json();
+
+                const tbody = document.getElementById('dirsearchTableBody');
+                tbody.innerHTML = '';
+
+                if (!directories || directories.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#888;">No hidden directories found</td></tr>';
+                    return;
+                }
+
+                directories.forEach(function(dir) {
+                    let badgeColor = '#00ff88';
+                    let badgeText = dir.status + ' OK';
+                    if (dir.status === 403) { badgeColor = '#ffa500'; badgeText = '403 Forbidden'; }
+                    else if (dir.status === 500) { badgeColor = '#ff4444'; badgeText = '500 Error'; }
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML =
+                        '<td><a href="' + dir.url + '" target="_blank" style="color:#00d4ff;text-decoration:none;">' + dir.url + '</a></td>' +
+                        '<td><span class="badge" style="background:' + badgeColor + ';color:#000;">' + badgeText + '</span></td>';
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error loading directories:', error);
+            }
+        }
+
+        // =====================================================================
+        // LOAD ALL
+        // =====================================================================
+
+        async function loadAllData() {
+            loadStatus();
+            loadStatistics();
+            loadExecutive();
+            loadHosts();
+            loadVulnerabilities();
+            loadCves();
+            loadApiSecurity();
+            loadPorts();
+            loadModules();
+            loadDirsearch();
+            loadComparison();
+            loadChanges();
+        }
+
+        // =====================================================================
+        // EVENT HANDLERS
+        // =====================================================================
+
+        document.getElementById('targetDropdown').addEventListener('change', function(e) {
+            currentTargetKey = e.target.value;
+            currentTarget = null;
+            loadRevisions(true).then(loadAllData);
+        });
+
+        document.getElementById('revisionDropdown').addEventListener('change', function(e) {
+            currentTarget = e.target.value;
+            loadAllData();
+        });
+
+        // Tab switching
+        document.querySelectorAll('.nav-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById(this.getAttribute('data-tab')).classList.add('active');
+            });
+        });
+
+        // Host table sorting
+        document.querySelectorAll('#hostsTable th[data-sort]').forEach(function(th) {
+            th.addEventListener('click', function() {
+                const field = this.getAttribute('data-sort');
+                if (hostSortField === field) {
+                    hostSortAsc = !hostSortAsc;
+                } else {
+                    hostSortField = field;
+                    hostSortAsc = field === 'host' || field === 'ip';
+                }
+                sortAndRenderHosts();
+            });
+        });
+
+        // Search box — reuses loadHosts which now sends both filter + query
+        document.getElementById('searchBox').addEventListener('input', function() {
+            loadHosts();
+        });
+
+        // Host filter buttons (exclude the API-security tool filters)
+        document.querySelectorAll('.filter-btn[data-filter]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.filter-btn[data-filter]').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentFilter = this.getAttribute('data-filter');
+                loadHosts();
+            });
+        });
+
+        // API security tool filter buttons
+        document.querySelectorAll('.apisec-filter-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.apisec-filter-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                apisecTool = this.getAttribute('data-tool');
+                renderApiSecurity();
+            });
+        });
+
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+
+        loadTargets().then(loadAllData);
+        setInterval(function() { loadAllData(); loadTargets(); }, 15000);
+    </script>
+</body>
+</html>

@@ -265,6 +265,7 @@ create_directories() {
     mkdir -p "$OUTPUT_DIR/12_nuclei_scanning"
     mkdir -p "$OUTPUT_DIR/13_xss_testing"
     mkdir -p "$OUTPUT_DIR/14_port_scan"
+    mkdir -p "$OUTPUT_DIR/17_cloud_exposure"
     mkdir -p "$OUTPUT_DIR/14_reporting"
     mkdir -p "$OUTPUT_DIR/reports"
     mkdir -p "$OUTPUT_DIR/04_http_discovery/responses"
@@ -640,7 +641,7 @@ module_http_discovery() {
     
     # Update manifest
     [ -f "$OUTPUT_DIR/04_http_discovery/http_confirmed.json" ] && \
-        jq -r 'select(.status_code != null) | "\(.host)|\(.status_code)"' "$OUTPUT_DIR/04_http_discovery/http_confirmed.json" | \
+        jq -r 'select(.status_code != null) | "\(.input // .host)|\(.status_code)"' "$OUTPUT_DIR/04_http_discovery/http_confirmed.json" | \
         while IFS='|' read -r host status; do
             [ -z "$host" ] || [ -z "$status" ] && continue
             update_manifest_bulk "$host" "{\"http_status\": $status, \"has_webapp\": true}"
@@ -947,23 +948,162 @@ module_header_analysis() {
         
         header_scores=$((header_scores + score))
         ((hosts_analyzed++))
-        
+
     done < "$urls_file"
-    
+
     local avg_score=0
     [ $hosts_analyzed -gt 0 ] && avg_score=$((header_scores / hosts_analyzed))
-    
+
+    # ── API endpoint detection ──
+    log_info "Running API endpoint detection..."
+    local api_count=0
+    api_count=$(python3 - "$http_confirmed" "$OUTPUT_DIR/09_crawling/all_urls.txt" "$MANIFEST_FILE" << 'APIDETECT_EOF'
+import json, sys, re, os
+
+httpx_file = sys.argv[1]
+crawled_file = sys.argv[2]
+manifest_file = sys.argv[3]
+
+API_CONTENT_TYPES = {'application/json', 'application/xml', 'application/grpc',
+                     'text/xml', 'application/soap+xml', 'application/graphql',
+                     'application/vnd.api+json', 'application/hal+json',
+                     'application/problem+json'}
+API_PATH_RE = re.compile(r'/api/|/v[0-9]+/|/graphql|/rest/|/ws/|/rpc/|/oauth/|/token|/webhook', re.I)
+API_SERVER_BANNERS = {'gunicorn', 'uvicorn', 'kestrel', 'fastapi', 'express',
+                      'daphne', 'puma', 'thin', 'phusion', 'openresty'}
+HTML_TECH = {'react', 'jquery', 'bootstrap', 'angular', 'vue', 'wordpress',
+             'drupal', 'joomla', 'wix', 'squarespace', 'next.js', 'nuxt',
+             'tailwind', 'materialize'}
+
+# Parse httpx data per host
+host_httpx = {}
+if os.path.exists(httpx_file):
+    with open(httpx_file, errors='ignore') as f:
+        for line in f:
+            try:
+                e = json.loads(line.strip())
+                host = e.get('input') or e.get('host', '')
+                if not host:
+                    continue
+                host_httpx.setdefault(host, []).append(e)
+            except Exception:
+                continue
+
+# Parse crawled URLs per host
+host_crawled = {}
+if os.path.exists(crawled_file):
+    with open(crawled_file, errors='ignore') as f:
+        for line in f:
+            url = line.strip()
+            if not url:
+                continue
+            try:
+                h = url.split('//')[1].split('/')[0].split(':')[0]
+                host_crawled.setdefault(h, []).append(url)
+            except Exception:
+                continue
+
+# Load manifest
+manifest = {}
+if os.path.exists(manifest_file):
+    with open(manifest_file) as f:
+        manifest = json.load(f)
+
+api_hosts = {}
+
+for host, entries in host_httpx.items():
+    signals = []
+
+    for e in entries:
+        ct = (e.get('content_type') or '').lower().strip()
+        path = e.get('path', '/')
+        words = e.get('words', 0) or 0
+        lines = e.get('lines', 0) or 0
+        tech = [t.lower() for t in (e.get('tech') or [])]
+        server = (e.get('webserver') or '').lower()
+
+        # Tier 1: API content-type + API path pattern
+        ct_base = ct.split(';')[0].strip()
+        is_api_ct = ct_base in API_CONTENT_TYPES
+        is_api_path = bool(API_PATH_RE.search(path))
+
+        if is_api_ct and is_api_path:
+            signals.append('content_type+path')
+
+        # Tier 2: API content-type + compact response (JSON blob, not HTML)
+        if is_api_ct and words > 0 and lines <= 3:
+            signals.append('content_type+compact_response')
+
+        # Tier 3: API content-type + no HTML framework in tech stack
+        if is_api_ct:
+            has_html_tech = any(t in HTML_TECH for t in tech)
+            if not has_html_tech:
+                signals.append('content_type+no_html_tech')
+
+        # Tier 4: API server banner + API content-type
+        if is_api_ct and any(b in server for b in API_SERVER_BANNERS):
+            signals.append('api_server+content_type')
+
+    # Tier 5: crawled URLs show API paths, and no crawled URL returned HTML for this host
+    crawled = host_crawled.get(host, [])
+    api_urls = [u for u in crawled if API_PATH_RE.search(u)]
+    if api_urls:
+        # Check if any httpx entry for this host had text/html as primary
+        has_html_primary = any(
+            (e.get('content_type') or '').startswith('text/html')
+            and (e.get('words', 0) or 0) > 100
+            for e in entries
+        )
+        if not has_html_primary:
+            signals.append('crawled_api_paths+no_html')
+        else:
+            signals.append('crawled_api_paths_mixed')
+
+    if signals:
+        # Deduplicate
+        unique_signals = list(dict.fromkeys(signals))
+        # Definite API: tier 1 or 2 or (tier 3 + server banner)
+        is_definite = any(s in unique_signals for s in
+            ['content_type+path', 'content_type+compact_response', 'api_server+content_type'])
+        is_api_host = any(s in unique_signals for s in
+            ['content_type+no_html_tech', 'crawled_api_paths+no_html'])
+
+        if is_definite or is_api_host:
+            api_hosts[host] = {
+                'is_api': True,
+                'api_signals': unique_signals,
+                'api_urls': api_urls[:10],
+            }
+
+# Write to manifest
+count = 0
+if api_hosts and manifest:
+    for host, api_data in api_hosts.items():
+        if host in manifest.get('hosts', {}):
+            manifest['hosts'][host]['is_api'] = True
+            manifest['hosts'][host]['api_signals'] = api_data['api_signals']
+            count += 1
+    with open(manifest_file, 'w') as f:
+        json.dump(manifest, f, indent=2)
+
+print(count)
+APIDETECT_EOF
+    ) || api_count=0
+
+    log_info "API endpoints detected: $api_count hosts"
+
     local end_time=$(date +%s)
     cat > "$output_file" << EOF
 {
   "module": "header_analysis",
   "hosts_analyzed": $hosts_analyzed,
   "average_score": $avg_score,
+  "api_hosts_detected": $api_count,
   "findings_file": "header_findings.jsonl",
   "duration_seconds": $((end_time - start_time))
 }
 EOF
-    
+
     log_info "Header analysis completed"
     echo "$output_file"
 }
@@ -1086,45 +1226,33 @@ EOF
     echo "$output_file"
 }
 ###################################################################################################
-# MODULE 8: DIRECTORY DISCOVERY WITH WAF-AWARE GATING
+# MODULE 8: DIRECTORY DISCOVERY
 ###################################################################################################
 
 module_directory_discovery() {
     local target="$1"
     log_section "MODULE 8: Directory Discovery"
     
-    local skip_file="$OUTPUT_DIR/05_waf_detection/skip_bruteforce.txt"
     local http_hosts_file="$OUTPUT_DIR/04_http_discovery/http_hosts.txt"
-    
+
     local start_time=$(date +%s)
     local output_file="$OUTPUT_DIR/08_directory_discovery/$(make_iso_filename "$target" "directory_discovery" "results")"
-    
+
     mkdir -p "$OUTPUT_DIR/08_directory_discovery/results"
-    
+
     log_info "Running directory discovery..."
-    
+
     # Check if we have http hosts
     [ ! -f "$http_hosts_file" ] && { log_warn "No HTTP hosts file found"; return 0; }
-    
-    # Filter out WAF-protected hosts
+
+    # Use all HTTP hosts including WAF-protected ones
     local safe_hosts_file="$OUTPUT_DIR/08_directory_discovery/safe_hosts.txt"
-    > "$safe_hosts_file"
-    
-    while IFS= read -r host; do
-        [ -z "$host" ] && continue
-        local plain_host=$(url_host "$host")
-        # Skip if in skip_bruteforce list
-        if [ -f "$skip_file" ] && grep -Fqx "$plain_host" "$skip_file" 2>/dev/null; then
-            log_debug "Skipping WAF-protected: $host"
-            continue
-        fi
-        echo "$host" >> "$safe_hosts_file"
-    done < "$http_hosts_file"
-    
+    grep -v '^$' "$http_hosts_file" > "$safe_hosts_file"
+
     local host_count=$(wc -l < "$safe_hosts_file" | tr -d ' ')
-    [ "$host_count" -eq 0 ] && { log_info "All hosts are WAF-protected, skipping directory discovery"; return 0; }
-    
-    log_info "Found $host_count hosts safe for bruteforce"
+    [ "$host_count" -eq 0 ] && { log_warn "No HTTP hosts available for directory discovery"; return 0; }
+
+    log_info "Running directory discovery on $host_count hosts"
     
     # Run dirsearch with plain text file input (Zero-Recon style)
     if command -v dirsearch &>/dev/null; then
@@ -1691,6 +1819,755 @@ EOF
     echo "$output_file"
 }
 ###################################################################################################
+# MODULE 15: SQL INJECTION TESTING (sqlmap — WAF-aware safe detection)
+###################################################################################################
+
+SQLI_MAX_URLS="${SQLI_MAX_URLS:-30}"
+
+# Map WAF vendors to sqlmap tamper scripts that work best against them
+_sqli_tamper_for_waf() {
+    local waf="$1"
+    case "$(echo "$waf" | tr '[:upper:]' '[:lower:]')" in
+        cloudflare)    echo "between,randomcase,space2comment" ;;
+        akamai)        echo "space2hash,between,randomcase" ;;
+        imperva|incapsula) echo "space2mssqlhash,randomcase,charencode" ;;
+        f5*|big-ip)    echo "space2mssqlblank,percentage,randomcase" ;;
+        aws*|awswaf)   echo "space2comment,between,charencode" ;;
+        barracuda)     echo "space2plus,randomcase,between" ;;
+        fortinet|fortiweb) echo "space2morehash,randomcase,charencode" ;;
+        modsecurity)   echo "space2comment,charencode,between" ;;
+        sucuri)        echo "between,randomcase,space2comment" ;;
+        envoy)         echo "between,randomcase" ;;
+        *)             echo "between,randomcase,space2comment" ;;
+    esac
+}
+
+# Run a single sqlmap pass; returns 0 if injection found
+_sqli_run_sqlmap() {
+    local url="$1" run_dir="$2" pass_name="$3"
+    shift 3
+    local extra_args=("$@")
+
+    sqlmap -u "$url" \
+        --batch \
+        --level=1 \
+        --risk=1 \
+        --timeout=10 \
+        --retries=1 \
+        --threads=1 \
+        --output-dir="$run_dir" \
+        --flush-session \
+        --drop-set-cookie \
+        --random-agent \
+        --fresh-queries \
+        "${extra_args[@]}" \
+        2>/dev/null > "$run_dir/${pass_name}.log"
+
+    # Check for confirmed injection — sqlmap emits "the following injection point"
+    # on a real find. NEVER match "injectable" alone: the negative output
+    # "do not appear to be injectable" contains that word and causes false positives.
+    local log="$run_dir/${pass_name}.log"
+    if grep -q "the following injection point" "$log" 2>/dev/null \
+       && ! grep -q "do not appear to be injectable" "$log" 2>/dev/null; then
+        if ! grep -qi "WAF/IPS.*identified\|blocked by\|403 Forbidden.*protection" "$log" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Detect if a sqlmap log shows WAF interference
+_sqli_waf_blocked() {
+    local log_file="$1"
+    [ ! -f "$log_file" ] && return 1
+    grep -qiE "WAF/IPS|heuristic.*detected|403 Forbidden|406 Not Acceptable|429 Too Many|responded with 403|blocked|Access Denied" "$log_file" 2>/dev/null
+}
+
+module_sqli_testing() {
+    local target="$1"
+    log_section "MODULE 15: SQL Injection Testing (WAF-Aware)"
+
+    local start_time=$(date +%s)
+    local output_file="$OUTPUT_DIR/15_sqli_testing/$(make_iso_filename "$target" "sqli_testing" "results")"
+    local results_jsonl="$OUTPUT_DIR/15_sqli_testing/sqli_results.jsonl"
+    > "$results_jsonl"
+
+    if ! command -v sqlmap &>/dev/null; then
+        log_warn "sqlmap not installed, skipping SQL injection testing"
+        cat > "$output_file" << EOF
+{
+  "module": "sqli_testing",
+  "candidates": 0,
+  "findings": 0,
+  "waf_blocked": 0,
+  "scanner_status": "unavailable",
+  "duration_seconds": 0
+}
+EOF
+        echo "$output_file"
+        return 0
+    fi
+
+    # Gather SQLi candidate URLs from crawled URLs and param fuzzing
+    local sqli_candidates="$OUTPUT_DIR/15_sqli_testing/sqli_candidates.txt"
+    > "$sqli_candidates"
+
+    local urls_file="$OUTPUT_DIR/09_crawling/all_urls.txt"
+
+    if [ -f "$urls_file" ]; then
+        if command -v gf &>/dev/null; then
+            $GF sqli "$urls_file" >> "$sqli_candidates" 2>/dev/null || true
+        fi
+        grep -iE '(\?|&)(id|user|item|cat|order|sort|page|dir|file|report|type|name|query|field|row|table|from|sel|results|search|lang|keyword|year|view|val|token|num|key|pid|uid|gid)=' \
+            "$urls_file" >> "$sqli_candidates" 2>/dev/null || true
+    fi
+
+    local dir_200="$OUTPUT_DIR/08_directory_discovery/dirsearch/200response.txt"
+    [ -f "$dir_200" ] && grep -F '?' "$dir_200" >> "$sqli_candidates" 2>/dev/null || true
+
+    sort -u "$sqli_candidates" -o "$sqli_candidates"
+    local total_candidates=$(wc -l < "$sqli_candidates" 2>/dev/null | tr -d ' ')
+    log_info "SQLi candidates found: $total_candidates"
+
+    if [ "$total_candidates" -eq 0 ]; then
+        log_info "No parameterized URLs to test for SQL injection"
+        cat > "$output_file" << EOF
+{
+  "module": "sqli_testing",
+  "candidates": 0,
+  "findings": 0,
+  "waf_blocked": 0,
+  "scanner_status": "no_candidates",
+  "duration_seconds": $(($(date +%s) - start_time))
+}
+EOF
+        echo "$output_file"
+        return 0
+    fi
+
+    local capped_file="$OUTPUT_DIR/15_sqli_testing/sqli_capped.txt"
+    head -n "$SQLI_MAX_URLS" "$sqli_candidates" > "$capped_file"
+    local test_count=$(wc -l < "$capped_file" | tr -d ' ')
+    log_info "Testing $test_count URLs (capped at $SQLI_MAX_URLS)"
+
+    # Build a host→waf lookup from the manifest
+    local waf_lookup_file="$OUTPUT_DIR/15_sqli_testing/waf_lookup.tsv"
+    jq -r '.hosts | to_entries[] | select(.value.waf_vendor != null and .value.waf_vendor != "none") | "\(.key)\t\(.value.waf_vendor)"' \
+        "$MANIFEST_FILE" > "$waf_lookup_file" 2>/dev/null || true
+
+    local sqli_dir="$OUTPUT_DIR/15_sqli_testing/sqlmap_output"
+    mkdir -p "$sqli_dir"
+    local findings=0
+    local waf_blocked_count=0
+
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+
+        local host
+        host=$(printf '%s' "$url" | sed 's|https\?://||' | cut -d'/' -f1 | cut -d':' -f1)
+        local url_hash
+        url_hash=$(printf '%s' "$url" | md5sum | cut -d' ' -f1)
+        local run_dir="$sqli_dir/$url_hash"
+        mkdir -p "$run_dir"
+
+        # Look up WAF vendor for this host
+        local host_waf=""
+        host_waf=$(grep -F "$host" "$waf_lookup_file" 2>/dev/null | head -1 | cut -f2)
+
+        if [ -n "$host_waf" ]; then
+            log_info "  sqlmap [WAF: $host_waf]: $url"
+        else
+            log_info "  sqlmap [no WAF]: $url"
+        fi
+
+        local found="false"
+        local pass_log=""
+        local pass_used=""
+
+        # ── Pass 1: clean baseline (no tamper, fresh session, drop cookies) ──
+        if _sqli_run_sqlmap "$url" "$run_dir" "pass1_baseline" \
+            --technique=BEU; then
+            found="true"
+            pass_log="$run_dir/pass1_baseline.log"
+            pass_used="baseline"
+        fi
+
+        # ── Pass 2: if WAF blocked pass 1, retry with WAF-tuned tamper scripts ──
+        if [ "$found" = "false" ] && _sqli_waf_blocked "$run_dir/pass1_baseline.log"; then
+            log_info "    WAF block detected, retrying with tamper scripts..."
+            local tamper_chain
+            tamper_chain=$(_sqli_tamper_for_waf "$host_waf")
+
+            if _sqli_run_sqlmap "$url" "$run_dir" "pass2_tamper" \
+                --technique=BEU \
+                --tamper="$tamper_chain" \
+                --delay=1; then
+                found="true"
+                pass_log="$run_dir/pass2_tamper.log"
+                pass_used="waf_tamper"
+            fi
+        fi
+
+        # ── Pass 3: if still blocked, try chunked encoding + different technique ──
+        if [ "$found" = "false" ] && _sqli_waf_blocked "$run_dir/pass2_tamper.log" 2>/dev/null; then
+            log_info "    Still blocked, trying chunked + error-based only..."
+
+            if _sqli_run_sqlmap "$url" "$run_dir" "pass3_chunked" \
+                --technique=E \
+                --tamper="chardoubleencode,between" \
+                --delay=2 \
+                --chunked; then
+                found="true"
+                pass_log="$run_dir/pass3_chunked.log"
+                pass_used="chunked_bypass"
+            fi
+        fi
+
+        # ── Record result ──
+        if [ "$found" = "true" ] && [ -f "$pass_log" ]; then
+            local sqli_type sqli_param confidence
+            sqli_type=$(grep -oP "Type: \K[^,]+" "$pass_log" 2>/dev/null | head -1)
+            [ -z "$sqli_type" ] && sqli_type="unknown"
+            sqli_param=$(grep -oP "Parameter: \K\S+" "$pass_log" 2>/dev/null | head -1)
+            [ -z "$sqli_param" ] && sqli_param="unknown"
+
+            # Confidence based on technique and WAF context
+            confidence="high"
+            echo "$sqli_type" | grep -qi "union" && confidence="medium"
+            echo "$sqli_type" | grep -qi "time\|blind" && confidence="medium"
+            # Finding through WAF bypass = lower confidence
+            [ "$pass_used" = "waf_tamper" ] && [ "$confidence" = "high" ] && confidence="medium"
+            [ "$pass_used" = "chunked_bypass" ] && confidence="low"
+
+            local finding_json
+            finding_json=$(jq -nc \
+                --arg url "$url" \
+                --arg host "$host" \
+                --arg sqli_type "$sqli_type" \
+                --arg param "$sqli_param" \
+                --arg confidence "$confidence" \
+                --arg waf "$host_waf" \
+                --arg pass "$pass_used" \
+                '{url:$url,host:$host,type:$sqli_type,parameter:$param,confidence:$confidence,waf_vendor:$waf,detection_pass:$pass}')
+            printf '%s\n' "$finding_json" >> "$results_jsonl"
+            ((findings++))
+            log_warn "  VULNERABLE: $host param=$sqli_param type=$sqli_type confidence=$confidence (pass=$pass_used)"
+
+        elif _sqli_waf_blocked "$run_dir/pass1_baseline.log" 2>/dev/null; then
+            ((waf_blocked_count++))
+            log_info "    WAF-blocked after all passes: $host"
+        fi
+
+    done < "$capped_file"
+
+    log_info "SQL injection testing completed: $findings findings, $waf_blocked_count WAF-blocked, from $test_count URLs"
+
+    local end_time=$(date +%s)
+    cat > "$output_file" << EOF
+{
+  "module": "sqli_testing",
+  "candidates": $total_candidates,
+  "tested": $test_count,
+  "findings": $findings,
+  "waf_blocked": $waf_blocked_count,
+  "scanner_status": "completed",
+  "duration_seconds": $((end_time - start_time))
+}
+EOF
+
+    echo "$output_file"
+}
+
+###################################################################################################
+# MODULE 16: API SECURITY TESTING (Autoswagger + RESTler, deduplicated)
+#
+# Two tools, two distinct purposes, one merged-but-deduplicated view:
+#   - Autoswagger -> authentication / authorization exposure (broken auth, BOLA, data leak)
+#   - RESTler     -> robustness / input handling (500s, input validation, stateful bugs)
+# Findings are tagged by tool; identical endpoint+issue pairs collapse into a single row.
+###################################################################################################
+
+APISEC_MAX_HOSTS="${APISEC_MAX_HOSTS:-10}"
+APISEC_RESTLER_TIME_BUDGET="${APISEC_RESTLER_TIME_BUDGET:-5}"   # minutes of fuzzing per spec (fuzz mode only)
+AUTOSWAGGER_BIN="${AUTOSWAGGER_BIN:-autoswagger}"
+AUTOSWAGGER_EXTRA_ARGS="${AUTOSWAGGER_EXTRA_ARGS:-}"
+RESTLER_BIN="${RESTLER_BIN:-restler}"
+APISEC_AUTH_TOKEN_CMD="${APISEC_AUTH_TOKEN_CMD:-}"
+APISEC_AUTH_REFRESH_SEC="${APISEC_AUTH_REFRESH_SEC:-300}"
+
+# Well-known OpenAPI / Swagger document locations to probe on each API host.
+APISEC_SPEC_PATHS=(
+    "/swagger.json" "/openapi.json" "/v2/api-docs" "/v3/api-docs"
+    "/swagger/v1/swagger.json" "/api-docs" "/api/swagger.json"
+    "/api/v1/swagger.json" "/api/openapi.json" "/openapi/v3.json"
+    "/.well-known/openapi.json" "/api/docs/swagger.json"
+    "/swagger-resources" "/api-docs/swagger.json" "/docs/swagger.json"
+)
+
+# Resolve the base URL (scheme + host) for an API host, preferring the scheme
+# recorded during HTTP discovery; default to https.
+_apisec_base_url() {
+    local host="$1"
+    local http_file="$OUTPUT_DIR/04_http_discovery/http_confirmed.json"
+    local url=""
+    if [ -f "$http_file" ]; then
+        url=$(grep -F "\"$host\"" "$http_file" 2>/dev/null | head -1 \
+            | jq -r '.url // empty' 2>/dev/null)
+    fi
+    if [ -n "$url" ]; then
+        printf '%s' "${url%/}"
+    else
+        printf 'https://%s' "$host"
+    fi
+}
+
+# Probe well-known OpenAPI locations. On the first spec-like response, save it
+# and echo the spec URL. Return 1 if none found.
+_apisec_discover_spec() {
+    local base="$1" host_spec_dir="$2"
+    local p url body
+    for p in "${APISEC_SPEC_PATHS[@]}"; do
+        url="${base%/}${p}"
+        body=$(curl -sk --max-time 8 -H 'Accept: application/json' "$url" 2>/dev/null)
+        [ -z "$body" ] && continue
+        if printf '%s' "$body" | grep -qiE '"(swagger|openapi)"[[:space:]]*:' \
+           && printf '%s' "$body" | grep -qi '"paths"'; then
+            printf '%s' "$body" > "$host_spec_dir/spec.json"
+            printf '%s' "$url"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Autoswagger: authentication / authorization surface testing. Auto-discovers
+# specs from the base URL; we also hand it the spec we found when available.
+_apisec_run_autoswagger() {
+    local base_url="$1" spec_url="$2" out_json="$3" host="$4"
+    log_info "  [autoswagger] $base_url"
+    local -a args=("$base_url")
+    [ -n "$spec_url" ] && args+=("$spec_url")
+    args+=(-risk -json)
+    [ -n "$AUTOSWAGGER_EXTRA_ARGS" ] && args+=($AUTOSWAGGER_EXTRA_ARGS)
+    "$AUTOSWAGGER_BIN" "${args[@]}" \
+        > "$out_json" 2>"${out_json%.json}.log" \
+        || log_warn "  [autoswagger] non-zero exit for $host (see ${out_json%.json}.log)"
+}
+
+# RESTler: robustness / input-handling fuzzing. Standard compile -> fuzz-lean
+# flow against the discovered spec, bounded by a time budget.
+_apisec_run_restler() {
+    local spec_file="$1" out_dir="$2" host="$3"
+    [ ! -f "$spec_file" ] && { log_info "  [restler] no spec for $host, skipping"; return 0; }
+    log_info "  [restler] fuzzing $host (fuzz-lean)"
+
+    mkdir -p "$out_dir"
+
+    "$RESTLER_BIN" --workingDirPath "$out_dir" compile --api_spec "$spec_file" \
+        > "$out_dir/compile.log" 2>&1 || {
+        log_warn "  [restler] compile failed for $host (see compile.log)"; return 0; }
+
+    local grammar="$out_dir/Compile/grammar.py"
+    local dict="$out_dir/Compile/dict.json"
+    [ ! -f "$grammar" ] && { log_warn "  [restler] no grammar produced for $host"; return 0; }
+
+    local -a fuzz_args=(--grammar_file "$grammar")
+    [ -f "$dict" ] && fuzz_args+=(--dictionary_file "$dict")
+    fuzz_args+=(--enable_checkers namespacerule)
+
+    if [ -n "$APISEC_AUTH_TOKEN_CMD" ]; then
+        fuzz_args+=(--token_refresh_command "$APISEC_AUTH_TOKEN_CMD"
+                    --token_refresh_interval "$APISEC_AUTH_REFRESH_SEC")
+    fi
+
+    "$RESTLER_BIN" --workingDirPath "$out_dir" fuzz-lean \
+        "${fuzz_args[@]}" \
+        > "$out_dir/fuzz.log" 2>&1 \
+        || log_warn "  [restler] fuzz non-zero exit for $host (see fuzz.log)"
+}
+
+# Parse both tools' native output, normalize into a shared taxonomy, template
+# paths, and deduplicate on (method, path, issue_class). Writes api_findings.jsonl.
+_apisec_normalize_and_dedup() {
+    local autoswagger_dir="$1" restler_dir="$2" findings_file="$3"
+    python3 - "$autoswagger_dir" "$restler_dir" "$findings_file" << 'PYEOF'
+import json, os, re, sys, glob
+
+autoswagger_dir, restler_dir, out_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+# Category -> which tool "owns" it when the same endpoint+issue is seen by both.
+CATEGORY_OWNER = {
+    "authn": "autoswagger", "authz": "autoswagger", "exposure": "autoswagger",
+    "robustness": "restler", "input_validation": "restler", "state": "restler",
+}
+
+_ID_SEG = re.compile(r'^(\d+|[0-9a-fA-F]{8,}|[0-9a-fA-F-]{16,})$')
+
+def template_path(path):
+    """Collapse concrete identifiers so /users/123 and /users/456 dedupe.
+    Strips scheme+host so autoswagger's full URLs match restler's relative paths."""
+    path = path or ''
+    path = re.sub(r'^https?://[^/]+', '', path)
+    path = re.sub(r'\?.*$', '', path)
+    parts = []
+    for seg in path.split('/'):
+        parts.append('{id}' if seg and _ID_SEG.match(seg) else seg)
+    tp = '/'.join(parts)
+    return tp if tp.startswith('/') or tp == '' else '/' + tp
+
+def host_from_url(url):
+    m = re.match(r'https?://([^/]+)', url or '')
+    return m.group(1) if m else ''
+
+# ---- Autoswagger: authentication / authorization findings ----------------
+AS_ISSUE = {
+    "unauthenticated": ("broken_authentication", "authn", "high"),
+    "no_auth":         ("broken_authentication", "authn", "high"),
+    "broken_auth":     ("broken_authentication", "authn", "high"),
+    "bola":            ("broken_object_authorization", "authz", "high"),
+    "idor":            ("broken_object_authorization", "authz", "high"),
+    "authorization":   ("broken_object_authorization", "authz", "high"),
+    "data_exposure":   ("sensitive_data_exposure", "exposure", "medium"),
+    "sensitive":       ("sensitive_data_exposure", "exposure", "medium"),
+}
+
+def classify_autoswagger(raw_type, accessible):
+    key = (raw_type or "").lower()
+    for k, v in AS_ISSUE.items():
+        if k in key:
+            return v
+    # Default: an endpoint reachable without auth is a broken-auth finding.
+    if accessible:
+        return ("broken_authentication", "authn", "high")
+    return ("api_exposure", "exposure", "low")
+
+def parse_autoswagger(d):
+    out = []
+    for jf in glob.glob(os.path.join(d, "*.json")):
+        try:
+            with open(jf) as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else data.get("findings", data.get("results", []))
+        if isinstance(items, dict):
+            items = [items]
+        for it in items or []:
+            if not isinstance(it, dict):
+                continue
+            method = (it.get("method") or it.get("http_method") or "GET").upper()
+            url = it.get("url") or it.get("endpoint") or it.get("path") or ""
+            path = it.get("path") or url
+            status = it.get("status") or it.get("status_code") or it.get("response_code")
+            accessible = bool(it.get("accessible", it.get("unauthenticated", status in (200, 201, 202, 204))))
+            issue_class, category, base_sev = classify_autoswagger(
+                it.get("type") or it.get("issue") or it.get("finding"), accessible)
+            sev = (it.get("severity") or base_sev).lower()
+            out.append({
+                "method": method,
+                "path": template_path(path),
+                "host": host_from_url(url) or it.get("host", ""),
+                "issue_class": issue_class,
+                "category": category,
+                "severity": sev if sev in SEV_RANK else base_sev,
+                "tool": "autoswagger",
+                "evidence": (it.get("evidence") or it.get("detail")
+                             or f"{method} reachable, status {status}")[:300],
+                "status_code": status,
+                "remediation": it.get("remediation")
+                    or "Enforce authentication and per-object authorization on this endpoint.",
+            })
+    return out
+
+# ---- RESTler: robustness / input-handling findings -----------------------
+RS_ISSUE = {
+    "500":              ("server_error", "robustness", "high"),
+    "main_driver_500":  ("server_error", "robustness", "high"),
+    "internalservererror": ("server_error", "robustness", "high"),
+    "payloadbody":      ("input_validation", "input_validation", "medium"),
+    "invaliddynamicobject": ("input_validation", "input_validation", "medium"),
+    "usedafterfree":    ("stateful_resource_bug", "state", "medium"),
+    "namespacerule":    ("broken_object_authorization", "authz", "high"),
+    "leakagerule":      ("resource_leak", "state", "medium"),
+}
+
+def classify_restler(bug_type):
+    key = re.sub(r'[^a-z0-9]', '', (bug_type or "").lower())
+    for k, v in RS_ISSUE.items():
+        if k.replace('_', '') in key:
+            return v
+    return ("robustness_bug", "robustness", "medium")
+
+def parse_restler(d):
+    out = []
+    found_json = False
+
+    # Primary: parse stable JSON from ResponseBuckets (runSummary.json + errorBuckets.json)
+    for summary_f in glob.glob(os.path.join(d, "**", "runSummary.json"), recursive=True):
+        try:
+            with open(summary_f) as f:
+                summary = json.load(f)
+        except Exception:
+            continue
+        found_json = True
+        bucket_dir = os.path.dirname(summary_f)
+        err_file = os.path.join(bucket_dir, "errorBuckets.json")
+        err_data = {}
+        if os.path.exists(err_file):
+            try:
+                with open(err_file) as f:
+                    err_data = json.load(f)
+            except Exception:
+                pass
+        for bucket_id, info in (summary if isinstance(summary, dict) else {}).items():
+            bug_type = err_data.get(bucket_id, {}).get("type", bucket_id)
+            issue_class, category, sev = classify_restler(bug_type)
+            method = info.get("method", "GET").upper() if isinstance(info, dict) else "GET"
+            path = info.get("endpoint", "/unknown") if isinstance(info, dict) else "/unknown"
+            out.append({
+                "method": method,
+                "path": template_path(path),
+                "host": "",
+                "issue_class": issue_class,
+                "category": category,
+                "severity": sev,
+                "tool": "restler",
+                "evidence": f"RESTler JSON bucket '{bug_type}' on {method} {path}"[:300],
+                "status_code": 500 if issue_class == "server_error" else None,
+                "remediation": "Add server-side input validation and handle malformed/edge-case payloads.",
+            })
+
+    # Also parse per-bug files for reproducibility info
+    for bug_file in glob.glob(os.path.join(d, "**", "bug_buckets", "*.txt"), recursive=True):
+        if os.path.basename(bug_file) == "bug_buckets.txt":
+            continue
+        try:
+            with open(bug_file, errors="ignore") as f:
+                text = f.read()
+        except Exception:
+            continue
+        bug_type = os.path.basename(bug_file).rsplit("_", 1)[0]
+        for m in re.finditer(r'^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\S+)', text, re.M):
+            issue_class, category, sev = classify_restler(bug_type)
+            key = (m.group(1).upper(), template_path(m.group(2)), issue_class)
+            if not any((r["method"], r["path"], r["issue_class"]) == key for r in out):
+                out.append({
+                    "method": m.group(1).upper(),
+                    "path": template_path(m.group(2)),
+                    "host": "",
+                    "issue_class": issue_class,
+                    "category": category,
+                    "severity": sev,
+                    "tool": "restler",
+                    "evidence": f"RESTler per-bug file '{bug_type}' on {m.group(1)} {m.group(2)}"[:300],
+                    "status_code": 500 if issue_class == "server_error" else None,
+                    "remediation": "Add server-side input validation and handle malformed/edge-case payloads.",
+                })
+
+    # Fallback: text-parse bug_buckets.txt only if no JSON was found
+    if not found_json:
+        for bb in glob.glob(os.path.join(d, "**", "bug_buckets.txt"), recursive=True):
+            try:
+                with open(bb, errors="ignore") as f:
+                    text = f.read()
+            except Exception:
+                continue
+            cur_type = None
+            for line in text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                if not s.startswith(("Received", "PUT", "POST", "GET", "DELETE",
+                                     "PATCH", "HEAD", "OPTIONS")) and s.endswith(":"):
+                    cur_type = s.rstrip(":")
+                    continue
+                m2 = re.match(r'^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\S+)', s)
+                if m2 and cur_type:
+                    issue_class, category, sev = classify_restler(cur_type)
+                    out.append({
+                        "method": m2.group(1).upper(),
+                        "path": template_path(m2.group(2)),
+                        "host": "",
+                        "issue_class": issue_class,
+                        "category": category,
+                        "severity": sev,
+                        "tool": "restler",
+                        "evidence": f"RESTler bucket '{cur_type}' on {m2.group(1)} {m2.group(2)}"[:300],
+                        "status_code": 500 if issue_class == "server_error" else None,
+                        "remediation": "Add server-side input validation and handle malformed/edge-case payloads.",
+                    })
+    return out
+
+# ---- Merge + dedup on (method, path, issue_class) -------------------------
+def merge(records):
+    merged = {}
+    for r in records:
+        key = (r["method"], r["path"], r["issue_class"])
+        if key not in merged:
+            r["tools"] = [r["tool"]]
+            merged[key] = r
+            continue
+        m = merged[key]
+        if r["tool"] not in m["tools"]:
+            m["tools"].append(r["tool"])
+        # keep the highest severity
+        if SEV_RANK.get(r["severity"], 0) > SEV_RANK.get(m["severity"], 0):
+            m["severity"] = r["severity"]
+        # primary tool = the one that owns this category
+        owner = CATEGORY_OWNER.get(m["category"], m["tool"])
+        if owner in m["tools"]:
+            m["tool"] = owner
+        # keep host if we learned one
+        if not m.get("host") and r.get("host"):
+            m["host"] = r["host"]
+        # append distinct evidence
+        if r["evidence"] and r["evidence"] not in m["evidence"]:
+            m["evidence"] = (m["evidence"] + " | " + r["evidence"])[:500]
+    return list(merged.values())
+
+all_findings = parse_autoswagger(autoswagger_dir) + parse_restler(restler_dir)
+final = merge(all_findings)
+final.sort(key=lambda x: (-SEV_RANK.get(x["severity"], 0), x["path"]))
+
+with open(out_file, "w") as f:
+    for r in final:
+        r["endpoint"] = f'{r["method"]} {r["path"]}'
+        f.write(json.dumps(r) + "\n")
+
+print(f"{len(final)} deduplicated API findings written")
+PYEOF
+}
+
+module_api_security() {
+    local target="$1"
+    log_section "MODULE 16: API Security Testing (Autoswagger + RESTler)"
+
+    local start_time=$(date +%s)
+    local base_dir="$OUTPUT_DIR/16_api_security"
+    local autoswagger_dir="$base_dir/autoswagger"
+    local restler_dir="$base_dir/restler"
+    local spec_dir="$base_dir/specs"
+    local findings_file="$base_dir/api_findings.jsonl"
+    local output_file="$base_dir/$(make_iso_filename "$target" "api_security" "results")"
+    mkdir -p "$autoswagger_dir" "$restler_dir" "$spec_dir"
+    > "$findings_file"
+
+    # Pull API hosts tagged by module 6 detection.
+    local api_hosts_file="$base_dir/api_hosts.txt"
+    jq -r '.hosts | to_entries[] | select(.value.is_api == true) | .key' \
+        "$MANIFEST_FILE" 2>/dev/null | sort -u > "$api_hosts_file"
+    local api_host_count=$(wc -l < "$api_hosts_file" 2>/dev/null | tr -d ' ')
+    log_info "API hosts tagged for security testing: $api_host_count"
+
+    if [ "$api_host_count" -eq 0 ]; then
+        cat > "$output_file" << EOF
+{
+  "module": "api_security",
+  "api_hosts": 0,
+  "findings": 0,
+  "autoswagger_findings": 0,
+  "restler_findings": 0,
+  "scanner_status": "no_targets",
+  "duration_seconds": $(($(date +%s) - start_time))
+}
+EOF
+        echo "$output_file"
+        return 0
+    fi
+
+    local have_autoswagger=false have_restler=false
+    command -v "$AUTOSWAGGER_BIN" &>/dev/null && have_autoswagger=true
+    command -v "$RESTLER_BIN" &>/dev/null && have_restler=true
+
+    if [ "$have_autoswagger" = false ] && [ "$have_restler" = false ]; then
+        log_warn "Neither autoswagger nor restler installed; skipping API security testing"
+        cat > "$output_file" << EOF
+{
+  "module": "api_security",
+  "api_hosts": $api_host_count,
+  "findings": 0,
+  "autoswagger_findings": 0,
+  "restler_findings": 0,
+  "scanner_status": "unavailable",
+  "duration_seconds": $(($(date +%s) - start_time))
+}
+EOF
+        echo "$output_file"
+        return 0
+    fi
+
+    log_info "Tools available -> autoswagger: $have_autoswagger, restler: $have_restler"
+
+    local tested=0 specs_found=0
+    while IFS= read -r host; do
+        [ -z "$host" ] && continue
+        [ "$tested" -ge "$APISEC_MAX_HOSTS" ] && { log_info "Reached APISEC_MAX_HOSTS cap ($APISEC_MAX_HOSTS)"; break; }
+
+        local host_hash
+        host_hash=$(printf '%s' "$host" | md5sum | cut -d' ' -f1)
+        local base_url
+        base_url=$(_apisec_base_url "$host")
+        local host_spec_dir="$spec_dir/$host_hash"
+        mkdir -p "$host_spec_dir"
+
+        local spec_url=""
+        spec_url=$(_apisec_discover_spec "$base_url" "$host_spec_dir") || true
+        if [ -n "$spec_url" ]; then
+            log_info "  [$host] OpenAPI spec: $spec_url"
+            ((specs_found++))
+        else
+            log_info "  [$host] no OpenAPI spec discovered"
+        fi
+
+        # Autoswagger -> auth/authz surface (can run without a discovered spec).
+        if [ "$have_autoswagger" = true ]; then
+            _apisec_run_autoswagger "$base_url" "$spec_url" "$autoswagger_dir/$host_hash.json" "$host"
+        fi
+
+        # RESTler -> robustness fuzzing (requires a spec to build a grammar).
+        if [ "$have_restler" = true ]; then
+            if [ -f "$host_spec_dir/spec.json" ]; then
+                _apisec_run_restler "$host_spec_dir/spec.json" "$restler_dir/$host_hash" "$host"
+            else
+                log_info "  [$host] skipping RESTler (no spec to fuzz)"
+            fi
+        fi
+
+        ((tested++))
+    done < "$api_hosts_file"
+
+    # Normalize + dedup across both tools.
+    _apisec_normalize_and_dedup "$autoswagger_dir" "$restler_dir" "$findings_file"
+
+    local total_findings as_count rs_count both_count
+    total_findings=$(wc -l < "$findings_file" 2>/dev/null | tr -d ' ')
+    as_count=$(grep -c '"tool": "autoswagger"' "$findings_file" 2>/dev/null || echo 0)
+    rs_count=$(grep -c '"tool": "restler"' "$findings_file" 2>/dev/null || echo 0)
+    both_count=$(grep -c '"autoswagger".*"restler"\|"restler".*"autoswagger"' "$findings_file" 2>/dev/null || echo 0)
+    log_info "API security testing complete: $total_findings findings (autoswagger:$as_count restler:$rs_count multi-tool:$both_count) across $tested hosts, $specs_found specs"
+
+    local end_time=$(date +%s)
+    cat > "$output_file" << EOF
+{
+  "module": "api_security",
+  "api_hosts": $api_host_count,
+  "tested": $tested,
+  "specs_found": $specs_found,
+  "findings": ${total_findings:-0},
+  "autoswagger_findings": ${as_count:-0},
+  "restler_findings": ${rs_count:-0},
+  "multi_tool_findings": ${both_count:-0},
+  "scanner_status": "completed",
+  "duration_seconds": $((end_time - start_time))
+}
+EOF
+
+    echo "$output_file"
+}
+
+###################################################################################################
 # MODULE 14: FULL PORT SCANNING
 ###################################################################################################
 
@@ -1864,6 +2741,496 @@ EOF
     echo "$output_file"
 }
 ###################################################################################################
+# MODULE 17: CLOUD ATTACK SURFACE EXPOSURE
+#
+# Detects cloud-native external exposures using existing tools + nuclei, with
+# custom ARISE templates for the gaps, then scores every finding with a weighted
+# model: weighted_score = base_weight x exploitability x exposure.
+#
+#   base_weight  - blast radius of the finding class (see BASE_WEIGHT table below)
+#   exploitability - detection confidence: 1.0 confirmed unauth access,
+#                    0.7 reachable/auth-unknown, 0.4 indicator only (port/DNS)
+#   exposure     - internet reachability: 1.0 direct, 0.85 behind CDN (bypassable),
+#                    0.6 behind WAF/auth-gated
+###################################################################################################
+
+# SPF / DKIM / DMARC posture for the apex domain (native, dig-based).
+_cloud_check_email_auth() {
+    local domain="$1" out="$2"
+    command -v dig &>/dev/null || { echo '{}' > "$out"; return 0; }
+
+    local spf dmarc dkim_found="false" dmarc_policy="none"
+    spf=$(dig +short TXT "$domain" 2>/dev/null | tr -d '"' | grep -i 'v=spf1' | head -1)
+    dmarc=$(dig +short TXT "_dmarc.$domain" 2>/dev/null | tr -d '"' | grep -i 'v=DMARC1' | head -1)
+    if [ -n "$dmarc" ]; then
+        dmarc_policy=$(printf '%s' "$dmarc" | grep -oiE 'p=[a-zA-Z]+' | head -1 | cut -d= -f2)
+        [ -z "$dmarc_policy" ] && dmarc_policy="none"
+    fi
+    local sel
+    for sel in default google selector1 selector2 k1 mail dkim s1 s2 smtp; do
+        if dig +short TXT "${sel}._domainkey.$domain" 2>/dev/null | grep -qiE 'v=DKIM1|k=rsa|p='; then
+            dkim_found="true"; break
+        fi
+    done
+    jq -nc --arg spf "$spf" --arg dmarc "$dmarc" --arg policy "$dmarc_policy" --argjson dkim "$dkim_found" \
+        '{spf_present:($spf|length>0), spf:$spf, dmarc_present:($dmarc|length>0), dmarc_policy:$policy, dkim_present:$dkim}' \
+        > "$out" 2>/dev/null || echo '{}' > "$out"
+}
+
+# CDN/WAF origin-bypass test: can a protected host be reached directly on its
+# origin IP with the correct Host header, returning the same application?
+_cloud_origin_bypass() {
+    local out="$1"
+    local dns_json="$OUTPUT_DIR/03_dns_resolution/dns_results.json"
+    [ ! -f "$dns_json" ] && return 0
+    [ ! -f "$MANIFEST_FILE" ] && return 0
+
+    local max="${CLOUD_ORIGIN_MAX:-25}" tested=0
+    local protected
+    protected=$(jq -r '.hosts | to_entries[]
+        | select(.value.cdn==true or (.value.waf_vendor!=null and .value.waf_vendor!="none"))
+        | .key' "$MANIFEST_FILE" 2>/dev/null)
+    [ -z "$protected" ] && return 0
+
+    while IFS= read -r host; do
+        [ -z "$host" ] && continue
+        [ "$tested" -ge "$max" ] && break
+        local ips
+        ips=$(jq -r --arg h "$host" 'select(.host==$h) | .a[]?' "$dns_json" 2>/dev/null | sort -u)
+        [ -z "$ips" ] && continue
+
+        local base_len
+        base_len=$(curl -sk --max-time 8 "https://$host/" 2>/dev/null | wc -c | tr -d ' ')
+        [ "${base_len:-0}" -lt 200 ] && { tested=$((tested+1)); continue; }
+
+        local ip
+        while IFS= read -r ip; do
+            [ -z "$ip" ] && continue
+            local direct_code direct_len diff pct
+            direct_code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 \
+                --resolve "$host:443:$ip" "https://$host/" 2>/dev/null)
+            [ "$direct_code" != "200" ] && continue
+            direct_len=$(curl -sk --max-time 8 --resolve "$host:443:$ip" "https://$host/" 2>/dev/null | wc -c | tr -d ' ')
+            diff=$(( base_len > direct_len ? base_len - direct_len : direct_len - base_len ))
+            pct=$(( diff * 100 / (base_len + 1) ))
+            if [ "$pct" -lt 15 ]; then
+                jq -nc --arg host "$host" --arg ip "$ip" --argjson blen "$base_len" --argjson dlen "$direct_len" \
+                    '{host:$host, origin_ip:$ip, cdn_body_len:$blen, direct_body_len:$dlen}' >> "$out"
+                break
+            fi
+        done <<< "$ips"
+        tested=$((tested+1))
+    done <<< "$protected"
+}
+
+# Leaked cloud credentials: reuse trufflehog output, then regex-sweep served JS.
+_cloud_credentials() {
+    local out="$1"
+    local secrets="$OUTPUT_DIR/10_secret_scanning/secrets.json"
+    local js_dir="$OUTPUT_DIR/09_crawling/js_downloads"
+
+    if [ -f "$secrets" ]; then
+        jq -c '.[]
+            | select((.DetectorName // "") | test("AWS|GCP|Google|Azure|Cloud|S3|Gcs|PrivateKey";"i"))
+            | {tool:"trufflehog", detector:(.DetectorName//"unknown"),
+               file:((.SourceMetadata.Data.Filesystem.file)//""), redacted:(.Redacted//"")}' \
+            "$secrets" 2>/dev/null >> "$out" || true
+    fi
+
+    if [ -d "$js_dir" ]; then
+        python3 - "$js_dir" "$out" << 'CREDEOF'
+import sys, os, re, json
+js_dir, out = sys.argv[1], sys.argv[2]
+patterns = {
+    "aws_access_key_id": re.compile(r'\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'),
+    "google_api_key": re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'),
+    "gcp_service_account": re.compile(r'"type":\s*"service_account"'),
+    "azure_storage_key": re.compile(r'AccountKey=[A-Za-z0-9+/=]{80,}'),
+    "private_key_block": re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),
+}
+seen = set()
+with open(out, "a") as w:
+    for root, _, files in os.walk(js_dir):
+        for fn in files:
+            if not fn.endswith(".js"):
+                continue
+            fp = os.path.join(root, fn)
+            try:
+                data = open(fp, errors="ignore").read()
+            except Exception:
+                continue
+            for name, rx in patterns.items():
+                m = rx.search(data)
+                if not m:
+                    continue
+                key = (name, fn)
+                if key in seen:
+                    continue
+                seen.add(key)
+                w.write(json.dumps({"tool": "arise-regex", "detector": name,
+                                    "file": fp, "redacted": m.group(0)[:12] + "..."}) + "\n")
+CREDEOF
+    fi
+}
+
+module_cloud_exposure() {
+    local target="$1"
+    log_section "MODULE 17: Cloud Attack Surface Exposure"
+
+    local start_time=$(date +%s)
+    local base_dir="$OUTPUT_DIR/17_cloud_exposure"
+    mkdir -p "$base_dir"
+    local output_file="$base_dir/$(make_iso_filename "$target" "cloud_exposure" "results")"
+
+    local http_hosts_file="$OUTPUT_DIR/04_http_discovery/http_hosts.txt"
+    local nuclei_out="$base_dir/cloud_nuclei.jsonl"
+    local email_file="$base_dir/email_auth.json"
+    local origin_file="$base_dir/origin_bypass.jsonl"
+    local cred_file="$base_dir/cloud_credentials.jsonl"
+    local findings_file="$base_dir/cloud_findings.jsonl"
+    : > "$nuclei_out"; : > "$origin_file"; : > "$cred_file"
+
+    # 1. Curated nuclei pass: custom ARISE templates + official cloud tags.
+    local tmpl_dir="$PROJECT_ROOT/cloud-templates"
+    [ ! -d "$tmpl_dir" ] && tmpl_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cloud-templates"
+    local cloud_tags="aws,s3,bucket,gcs,azure,kubernetes,k8s,kubelet,etcd,elasticsearch,opensearch,kibana,redis,mongodb,memcached,grafana,prometheus,jenkins,gitlab,argocd,teamcity,drone,ssrf,metadata,exposure,debug,config"
+
+    if command -v "$NUCLEI" &>/dev/null && [ -s "$http_hosts_file" ]; then
+        if [ -d "$tmpl_dir" ]; then
+            log_info "Running ARISE custom cloud templates ($tmpl_dir)..."
+            "$NUCLEI" -l "$http_hosts_file" -t "$tmpl_dir" -j -silent -rl 100 -nc 2>/dev/null >> "$nuclei_out" || true
+        else
+            log_warn "Custom cloud-templates directory not found; using tags only"
+        fi
+        log_info "Running official nuclei cloud-tagged templates..."
+        "$NUCLEI" -l "$http_hosts_file" -tags "$cloud_tags" \
+            -severity low,medium,high,critical,unknown -j -silent -rl 100 -nc 2>/dev/null >> "$nuclei_out" || true
+    else
+        log_warn "nuclei unavailable or no HTTP hosts; skipping cloud nuclei pass"
+    fi
+    log_info "Cloud nuclei findings: $(count_lines "$nuclei_out")"
+
+    # 2. Email authentication posture (SPF/DKIM/DMARC).
+    log_info "Checking email authentication records (SPF/DKIM/DMARC)..."
+    _cloud_check_email_auth "$target" "$email_file"
+
+    # 3. CDN/WAF origin-bypass heuristic.
+    log_info "Testing protected hosts for CDN/WAF origin bypass..."
+    _cloud_origin_bypass "$origin_file"
+
+    # 4. Leaked cloud credentials.
+    log_info "Correlating leaked cloud credentials..."
+    _cloud_credentials "$cred_file"
+
+    # 5. Weighted scoring model.
+    log_info "Scoring cloud findings (severity x exploitability x exposure)..."
+    python3 - "$MANIFEST_FILE" "$nuclei_out" "$email_file" "$origin_file" "$cred_file" \
+        "$OUTPUT_DIR/14_port_scan/all_ports_list.txt" "$findings_file" "$base_dir/cloud_summary.json" << 'CLOUDSCORE_EOF'
+import sys, os, json
+
+manifest_file, nuclei_file, email_file, origin_file, cred_file, ports_file, out_file, summary_file = sys.argv[1:9]
+
+BASE_WEIGHT = {
+    "public_cloud_storage": 100, "public_kubernetes_api": 100,
+    "metadata_service_exposure": 100, "leaked_cloud_credentials": 100,
+    "terraform_state_exposed": 95, "public_elasticsearch": 95,
+    "public_cicd": 90, "public_redis_mongo": 90,
+    "grafana_prometheus_exposed": 80, "cdn_origin_bypass": 60,
+    "missing_waf": 40, "missing_email_auth": 25,
+    "debug_endpoint": 20, "information_disclosure": 15,
+}
+LABEL = {
+    "public_cloud_storage": "Public cloud storage",
+    "public_kubernetes_api": "Public Kubernetes API",
+    "metadata_service_exposure": "Metadata service exposure",
+    "leaked_cloud_credentials": "Leaked cloud credentials",
+    "terraform_state_exposed": "Exposed Terraform state",
+    "public_elasticsearch": "Public Elasticsearch/OpenSearch",
+    "public_cicd": "Public Jenkins/CI-CD",
+    "public_redis_mongo": "Public Redis/MongoDB",
+    "grafana_prometheus_exposed": "Exposed Grafana/Prometheus",
+    "cdn_origin_bypass": "CDN origin bypass",
+    "missing_waf": "Missing WAF",
+    "missing_email_auth": "Missing SPF/DKIM/DMARC",
+    "debug_endpoint": "Debug endpoint",
+    "information_disclosure": "Information disclosure",
+}
+REMEDIATION = {
+    "public_cloud_storage": "Disable public bucket ACLs; enforce Block Public Access and least-privilege IAM.",
+    "public_kubernetes_api": "Require authN/authZ on the API server and kubelet; restrict by network policy/firewall.",
+    "metadata_service_exposure": "Enforce IMDSv2, block egress to 169.254.169.254, and fix the SSRF/proxy allowing relay.",
+    "leaked_cloud_credentials": "Rotate the credential immediately, review CloudTrail/audit logs, and remove it from client code.",
+    "terraform_state_exposed": "Remove the state file from the web root; store state in an access-controlled backend.",
+    "public_elasticsearch": "Enable authentication and TLS; bind to private networks only.",
+    "public_cicd": "Require SSO/authentication, disable anonymous access, and restrict network reachability.",
+    "public_redis_mongo": "Enable authentication, bind to localhost/private nets, and firewall the port.",
+    "grafana_prometheus_exposed": "Disable anonymous access, require login, and place behind authenticated proxy.",
+    "cdn_origin_bypass": "Restrict origin to CDN/WAF egress IP ranges (ACL/security group/mTLS).",
+    "missing_waf": "Place internet-facing web apps behind a WAF/CDN with rules enabled.",
+    "missing_email_auth": "Publish SPF, DKIM, and a DMARC policy of quarantine or reject.",
+    "debug_endpoint": "Disable debug/introspection endpoints in production or require authentication.",
+    "information_disclosure": "Remove exposed internal information and restrict access.",
+}
+
+def sev_from_score(s):
+    if s >= 90: return "critical"
+    if s >= 60: return "high"
+    if s >= 30: return "medium"
+    if s >= 10: return "low"
+    return "info"
+
+def classify(tid, name, tags, arise_cat):
+    if arise_cat and arise_cat in BASE_WEIGHT:
+        return arise_cat
+    blob = " ".join([tid or "", name or "", " ".join(tags or [])]).lower()
+    rules = [
+        (("s3", "bucket", "gcs", "google-storage", "azure-blob", "blob-container", "object-storage"), "public_cloud_storage"),
+        (("kubernetes", "kubelet", "kube-", "k8s", "etcd", "kubeconfig", "kube-api"), "public_kubernetes_api"),
+        (("metadata", "instance-metadata", "imds"), "metadata_service_exposure"),
+        (("terraform", "tfstate"), "terraform_state_exposed"),
+        (("elasticsearch", "opensearch", "kibana"), "public_elasticsearch"),
+        (("jenkins", "gitlab", "teamcity", "argocd", "drone", "circleci", "bamboo", "gocd", "concourse"), "public_cicd"),
+        (("redis", "mongodb", "mongo", "memcached", "couchdb", "cassandra"), "public_redis_mongo"),
+        (("grafana", "prometheus", "alertmanager", "node-exporter"), "grafana_prometheus_exposed"),
+        (("actuator", "phpinfo", "werkzeug", "debug", "expvar", "heapdump"), "debug_endpoint"),
+    ]
+    for kws, cat in rules:
+        if any(k in blob for k in kws):
+            return cat
+    if "ssrf" in blob and "metadata" in blob:
+        return "metadata_service_exposure"
+    if any(k in blob for k in ("disclosure", "exposure", "exposed", "leak")):
+        return "information_disclosure"
+    return None
+
+manifest = {}
+if os.path.exists(manifest_file):
+    try:
+        manifest = json.load(open(manifest_file))
+    except Exception:
+        manifest = {}
+hosts_meta = manifest.get("hosts", {})
+
+def host_exposure(host):
+    hd = hosts_meta.get(host, {})
+    waf = (hd.get("waf_vendor") or "none").lower()
+    if waf not in ("none", ""):
+        return 0.6, "behind_waf"
+    if hd.get("cdn"):
+        return 0.85, "behind_cdn"
+    return 1.0, "direct"
+
+def host_from_url(u):
+    try:
+        return u.split("//")[1].split("/")[0].split(":")[0]
+    except Exception:
+        return u
+
+findings = []
+seen_host_cat = set()
+
+def add(cat, host, url, expl, tool, template, evidence, nuclei_sev=None, exposure_override=None):
+    exposure, note = host_exposure(host)
+    if exposure_override is not None:
+        exposure, note = exposure_override
+    base = BASE_WEIGHT[cat]
+    score = round(min(base * expl * exposure, 100.0), 1)
+    findings.append({
+        "cloud_category": cat, "category_label": LABEL[cat],
+        "source": "Cloud Exposure", "tool": tool,
+        "template": template, "host": host or "Unknown", "url": url,
+        "severity": sev_from_score(score), "nuclei_severity": nuclei_sev,
+        "base_weight": base, "exploitability": round(expl, 2),
+        "exposure": round(exposure, 2), "exposure_note": note,
+        "weighted_score": score, "evidence": (evidence or "")[:220],
+        "remediation": REMEDIATION[cat],
+    })
+
+# ---- nuclei findings ----
+if os.path.exists(nuclei_file):
+    for line in open(nuclei_file, errors="ignore"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        info = d.get("info", {})
+        tid = d.get("template-id", "")
+        name = info.get("name", "")
+        tags = info.get("tags", [])
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",")]
+        arise_cat = (info.get("metadata") or {}).get("arise-category")
+        cat = classify(tid, name, tags, arise_cat)
+        if not cat:
+            continue
+        sev = (info.get("severity", "info") or "info").lower()
+        url = d.get("matched-at") or d.get("url") or d.get("host", "")
+        host = host_from_url(d.get("host") or url)
+        extracted = d.get("extracted-results") or []
+        if sev in ("critical", "high") or extracted:
+            expl = 1.0
+        elif sev == "medium":
+            expl = 0.7
+        else:
+            expl = 0.5
+        evidence = ", ".join(extracted) if isinstance(extracted, list) else str(extracted)
+        add(cat, host, url, expl, "nuclei", name or tid, evidence, nuclei_sev=sev)
+        seen_host_cat.add((host, cat))
+
+# ---- port-scan inference (indicator only: exploitability 0.4) ----
+PORT_CAT = {
+    9200: "public_elasticsearch", 9300: "public_elasticsearch", 5601: "public_elasticsearch",
+    6379: "public_redis_mongo", 27017: "public_redis_mongo", 27018: "public_redis_mongo",
+    11211: "public_redis_mongo", 5984: "public_redis_mongo",
+    6443: "public_kubernetes_api", 10250: "public_kubernetes_api", 2379: "public_kubernetes_api",
+    9090: "grafana_prometheus_exposed", 3000: "grafana_prometheus_exposed",
+}
+if os.path.exists(ports_file):
+    for line in open(ports_file, errors="ignore"):
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        host, _, port = line.rpartition(":")
+        try:
+            port = int(port)
+        except ValueError:
+            continue
+        cat = PORT_CAT.get(port)
+        if not cat or (host, cat) in seen_host_cat:
+            continue
+        seen_host_cat.add((host, cat))
+        add(cat, host, "%s:%d" % (host, port), 0.4, "naabu",
+            "Open %d/tcp" % port, "port %d open (service/auth unconfirmed)" % port,
+            exposure_override=(1.0, "direct"))
+
+# ---- email authentication ----
+apex = manifest.get("pipeline_info", {}).get("target", "")
+if os.path.exists(email_file):
+    try:
+        ea = json.load(open(email_file))
+    except Exception:
+        ea = {}
+    if ea:
+        gaps = []
+        if not ea.get("spf_present"):
+            gaps.append("no SPF")
+        if not ea.get("dmarc_present"):
+            gaps.append("no DMARC")
+        elif ea.get("dmarc_policy", "none").lower() == "none":
+            gaps.append("DMARC p=none (monitor only)")
+        if not ea.get("dkim_present"):
+            gaps.append("no DKIM selector found")
+        if gaps:
+            add("missing_email_auth", apex, apex, 0.5, "dig",
+                "Email authentication gaps", "; ".join(gaps),
+                exposure_override=(1.0, "domain"))
+
+# ---- origin bypass ----
+if os.path.exists(origin_file):
+    for line in open(origin_file, errors="ignore"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        host = o.get("host", "")
+        add("cdn_origin_bypass", host, "https://%s (origin %s)" % (host, o.get("origin_ip", "")),
+            0.7, "arise", "Origin reachable directly",
+            "origin IP %s serves the app directly, bypassing CDN/WAF" % o.get("origin_ip", ""),
+            exposure_override=(0.85, "origin_reachable"))
+
+# ---- leaked cloud credentials ----
+if os.path.exists(cred_file):
+    cred_seen = set()
+    for line in open(cred_file, errors="ignore"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            c = json.loads(line)
+        except Exception:
+            continue
+        det = c.get("detector", "credential")
+        f = os.path.basename(c.get("file", ""))
+        key = (det, f)
+        if key in cred_seen:
+            continue
+        cred_seen.add(key)
+        add("leaked_cloud_credentials", apex, c.get("file", ""), 1.0,
+            c.get("tool", "arise"), det,
+            "%s in served asset (%s)" % (det, c.get("redacted", "")),
+            exposure_override=(1.0, "public_asset"))
+
+# ---- missing WAF (control gap; cap to limit noise) ----
+missing_waf = []
+for host, hd in hosts_meta.items():
+    if not hd.get("http_status"):
+        continue
+    waf = (hd.get("waf_vendor") or "none").lower()
+    if waf in ("none", "") and not hd.get("cdn"):
+        missing_waf.append(host)
+for host in missing_waf[:50]:
+    add("missing_waf", host, "https://%s" % host, 0.4, "arise",
+        "No WAF/CDN in front of web app", "internet-facing host without WAF or CDN",
+        exposure_override=(1.0, "direct"))
+
+# ---- write outputs ----
+findings.sort(key=lambda x: x["weighted_score"], reverse=True)
+with open(out_file, "w") as w:
+    for f in findings:
+        w.write(json.dumps(f) + "\n")
+
+by_cat = {}
+for f in findings:
+    c = f["cloud_category"]
+    by_cat.setdefault(c, {"label": LABEL[c], "count": 0, "max_score": 0})
+    by_cat[c]["count"] += 1
+    by_cat[c]["max_score"] = max(by_cat[c]["max_score"], f["weighted_score"])
+
+sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+for f in findings:
+    sev_counts[f["severity"]] = sev_counts.get(f["severity"], 0) + 1
+
+summary = {
+    "total_findings": len(findings),
+    "by_category": by_cat,
+    "by_severity": sev_counts,
+    "top_finding_score": findings[0]["weighted_score"] if findings else 0,
+}
+json.dump(summary, open(summary_file, "w"), indent=2)
+print(len(findings))
+CLOUDSCORE_EOF
+
+    local total=$(count_lines "$findings_file")
+    log_info "Cloud attack surface findings: $total (scored)"
+    if [ "$total" -gt 0 ]; then
+        log_info "Top cloud exposures:"
+        head -5 "$findings_file" | jq -r '"  [\(.weighted_score)] \(.category_label) - \(.host) (\(.severity))"' 2>/dev/null || true
+    fi
+
+    update_statistics "cloud_findings" "$total"
+
+    local end_time=$(date +%s)
+    cat > "$output_file" << EOF
+{
+  "module": "cloud_exposure",
+  "cloud_findings": $total,
+  "nuclei_findings": $(count_lines "$nuclei_out"),
+  "findings_file": "cloud_findings.jsonl",
+  "summary_file": "cloud_summary.json",
+  "duration_seconds": $((end_time - start_time))
+}
+EOF
+
+    log_info "Cloud attack surface exposure completed"
+    echo "$output_file"
+}
+###################################################################################################
 # MODULE 14: REPORTING
 ###################################################################################################
 
@@ -2008,10 +3375,12 @@ usage() {
     echo "  PUREDNS_RESOLVER_LIMIT Max public resolvers to use (default: 50)"
     echo "  PUREDNS_THREADS     Wildcard filtering threads (default: 10)"
     echo ""
+    echo "  CLOUD_ORIGIN_MAX    Max protected hosts to test for origin bypass (default: 25)"
+    echo ""
     echo "Modules: asset_discovery, subdomain_enum, dns_resolution, http_discovery,"
     echo "         waf_detection, header_analysis, service_fingerprint, directory_discovery,"
     echo "         crawling, secret_scanning, param_fuzzing, nuclei_scan, xss_testing,"
-    echo "         full_port_scan, reporting"
+    echo "         sqli_testing, api_security, full_port_scan, cloud_exposure, reporting"
     echo ""
     echo "Examples:"
     echo "  $0 example.com"
@@ -2088,9 +3457,10 @@ main() {
     
     # Execute modules
     local module_order=("asset_discovery" "subdomain_enum" "dns_resolution" "http_discovery" \
-                       "waf_detection" "header_analysis" "directory_discovery" "crawling" \
+                       "waf_detection" "crawling" "header_analysis" "directory_discovery" \
                        "secret_scanning" "param_fuzzing" "nuclei_scan" "xss_testing" \
-                       "full_port_scan" "service_fingerprint" "reporting")
+                       "sqli_testing" "api_security" "full_port_scan" "service_fingerprint" \
+                       "cloud_exposure" "reporting")
     
     local pipeline_failed=false
     for module in "${module_order[@]}"; do
@@ -2151,8 +3521,17 @@ main() {
             xss_testing)
                 module_xss_testing "$target"
                 ;;
+            sqli_testing)
+                module_sqli_testing "$target"
+                ;;
+            api_security)
+                module_api_security "$target"
+                ;;
             full_port_scan)
                 module_full_port_scan "$target"
+                ;;
+            cloud_exposure)
+                module_cloud_exposure "$target"
                 ;;
             reporting)
                 module_reporting "$target"
@@ -2178,8 +3557,8 @@ main() {
     update_statistics "duration_seconds" "$duration"
     local final_status="completed"
     [ "$pipeline_failed" = "true" ] && final_status="completed_with_errors"
-    jq --arg status "$final_status" --arg end "$(date -Iseconds)" \
-        '.pipeline_info.status = $status | .pipeline_info.end_time = $end' "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp" && \
+    jq --arg status "$final_status" --arg endtime "$(date -Iseconds)" \
+        '.pipeline_info.status = $status | .pipeline_info.end_time = $endtime' "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp" && \
         mv "${MANIFEST_FILE}.tmp" "$MANIFEST_FILE"
 }
 

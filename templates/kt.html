@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARISE — Knowledge Transfer</title>
+<style>
+:root {
+    --bg: #0d1117; --surface: #161b22; --surface-2: #1c2333; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --text-faint: #484f58;
+    --accent: #4f8cff; --accent-dim: rgba(79,140,255,.12);
+    --crit: #ff4d6d; --high: #ff8a3d; --med: #ffc43d; --low: #5ad1e0; --info: #8b98bd;
+    --aws: #ff9900; --gcp: #4285f4; --azure: #0078d4;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+.container { max-width:1100px; margin:0 auto; padding:40px 24px 80px; }
+.back { display:inline-flex; align-items:center; gap:6px; color:var(--accent); text-decoration:none; font-size:14px; margin-bottom:24px; }
+.back:hover { text-decoration:underline; }
+h1 { font-size:32px; font-weight:800; margin-bottom:6px; }
+h1 span { color:var(--accent); }
+.subtitle { color:var(--text-dim); font-size:15px; margin-bottom:36px; }
+h2 { font-size:20px; font-weight:700; margin:36px 0 14px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+h3 { font-size:16px; font-weight:600; margin:20px 0 8px; color:var(--accent); }
+p, li { color:var(--text-dim); font-size:14px; }
+ul, ol { padding-left:22px; margin-bottom:14px; }
+li { margin-bottom:6px; }
+code { background:var(--surface-2); padding:2px 6px; border-radius:4px; font-size:13px; font-family:ui-monospace, Menlo, monospace; color:var(--text); }
+pre { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; overflow-x:auto; margin:12px 0 18px; font-size:13px; line-height:1.5; }
+pre code { background:none; padding:0; }
+table { width:100%; border-collapse:collapse; margin:12px 0 18px; font-size:13px; }
+th { background:var(--surface); color:var(--text); font-weight:600; text-align:left; padding:10px 14px; border-bottom:2px solid var(--border); }
+td { padding:10px 14px; border-bottom:1px solid var(--border); color:var(--text-dim); vertical-align:top; }
+tr:hover td { background:var(--surface-2); }
+.badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+.b-crit { background:rgba(255,77,109,.14); color:var(--crit); }
+.b-high { background:rgba(255,138,61,.14); color:var(--high); }
+.b-med { background:rgba(255,196,61,.14); color:var(--med); }
+.b-low { background:rgba(90,209,224,.14); color:var(--low); }
+.b-info { background:rgba(139,152,189,.14); color:var(--info); }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; margin:14px 0; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.arch-flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:14px 0; }
+.arch-box { background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 16px; text-align:center; font-size:13px; font-weight:600; }
+.arch-box.highlight { border-color:var(--accent); background:var(--accent-dim); color:var(--accent); }
+.arch-arrow { color:var(--text-faint); font-size:18px; }
+.risk-table td:first-child { font-weight:600; }
+.provider { display:inline-flex; align-items:center; gap:4px; }
+.toc { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px 24px; margin-bottom:30px; }
+.toc-title { font-weight:700; font-size:14px; margin-bottom:8px; }
+.toc a { color:var(--accent); text-decoration:none; font-size:13px; display:block; padding:3px 0; }
+.toc a:hover { text-decoration:underline; }
+.tool-cat { color:var(--text); font-weight:600; margin-top:4px; }
+@media(max-width:768px) { .grid-2{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="container">
+    <a href="/" class="back">&larr; Back to Dashboard</a>
+    <h1><span>ARISE</span> Knowledge Transfer</h1>
+    <p class="subtitle">External Attack Surface Monitoring — Architecture, Modules, Risk Model, and Operations Guide</p>
+
+    <div class="toc">
+        <div class="toc-title">Contents</div>
+        <a href="#architecture">1. Architecture Overview</a>
+        <a href="#pipeline">2. Pipeline Modules (18 Stages)</a>
+        <a href="#tools">3. Tools & Dependencies</a>
+        <a href="#risk-model">4. Risk Scoring Model</a>
+        <a href="#cloud">5. Cloud Exposure Detection</a>
+        <a href="#api-security">6. API Security Testing</a>
+        <a href="#dashboard">7. Dashboard & API Endpoints</a>
+        <a href="#operations">8. Operations & CLI</a>
+        <a href="#tuning">9. Tuning & Configuration</a>
+    </div>
+
+    <h2 id="architecture">1. Architecture Overview</h2>
+    <p>ARISE is a state-driven EASM toolkit that converts a list of target domains into a complete exposure map. The system has three layers:</p>
+    <div class="arch-flow">
+        <div class="arch-box">hosts.txt<br><small>Target domains</small></div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-box highlight">arise.py<br><small>Orchestrator</small></div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-box highlight">easm-pipeline.sh<br><small>18-Module Pipeline</small></div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-box">manifest.json<br><small>State Store</small></div>
+        <div class="arch-arrow">&rarr;</div>
+        <div class="arch-box highlight">dashboard.py<br><small>Flask Dashboard</small></div>
+    </div>
+    <div class="card">
+        <h3>Data Flow</h3>
+        <ol>
+            <li><code>arise.py</code> reads <code>hosts.txt</code>, creates a timestamped scan directory under <code>scans/</code>, launches the pipeline</li>
+            <li><code>easm-pipeline.sh</code> runs 18 modules sequentially, writing results to numbered subdirectories and updating <code>manifest.json</code></li>
+            <li><code>dashboard.py</code> reads scan directories, parses all data sources (manifest, nuclei JSON, nmap services, httpx tech, cloud findings), and serves a real-time dashboard on port 5000</li>
+            <li>Each scan is isolated: <code>scans/{domain}-{DDMMYY}-{HHMM}/</code> with its own manifest, logs, and module output folders</li>
+        </ol>
+    </div>
+
+    <h2 id="pipeline">2. Pipeline Modules (18 Stages)</h2>
+    <table>
+        <thead><tr><th>#</th><th>Module</th><th>Tool(s)</th><th>Purpose</th><th>Output</th></tr></thead>
+        <tbody>
+            <tr><td>01</td><td>Asset Discovery</td><td>subfinder, haktrails</td><td>Passive subdomain enumeration from multiple sources</td><td>Subdomain list</td></tr>
+            <tr><td>02</td><td>Subdomain Enumeration</td><td>puredns, massdns</td><td>DNS brute-force with permutation and validation</td><td>Validated subdomains</td></tr>
+            <tr><td>03</td><td>DNS Resolution</td><td>dnsx</td><td>Bulk A/AAAA resolution, CDN vs origin classification</td><td>Resolved IPs, CNAME chains</td></tr>
+            <tr><td>04</td><td>HTTP Discovery</td><td>httpx</td><td>HTTP probing, status codes, tech detection, response storage</td><td>http_confirmed.json, tech stack</td></tr>
+            <tr><td>05</td><td>WAF Detection</td><td>wafw00f, nuclei, httpx</td><td>3-tier WAF fingerprinting (wafw00f &rarr; nuclei &rarr; httpx)</td><td>WAF vendor per host</td></tr>
+            <tr><td>06</td><td>Web Crawling</td><td>katana, gospider, gau</td><td>Active + passive URL harvesting for endpoint coverage</td><td>all_urls.txt</td></tr>
+            <tr><td>07</td><td>Header Analysis</td><td>Custom Python</td><td>Security header grading (HSTS, CSP, X-Frame, etc.)</td><td>Header scores per host</td></tr>
+            <tr><td>08</td><td>Service Fingerprinting</td><td>nmap (-sV)</td><td>Version detection for non-HTTP services on open ports</td><td>services.json</td></tr>
+            <tr><td>09</td><td>Directory Discovery</td><td>dirsearch, ffuf</td><td>WAF-aware directory brute-forcing (batched, rate-limited)</td><td>200/403/500 response lists</td></tr>
+            <tr><td>10</td><td>Secret Scanning</td><td>trufflehog, gf</td><td>Scan JS files & endpoints for API keys, tokens, credentials</td><td>Secret findings</td></tr>
+            <tr><td>11</td><td>Parameter Fuzzing</td><td>ffuf, gf</td><td>Discover URL parameters for injection testing</td><td>Parameter list per endpoint</td></tr>
+            <tr><td>12</td><td>Nuclei Scanning</td><td>nuclei</td><td>Template-based vulnerability detection (CVEs, misconfigs)</td><td>Nuclei JSON results</td></tr>
+            <tr><td>13</td><td>XSS Testing</td><td>dalfox</td><td>Reflected/DOM XSS validation on discovered parameters</td><td>Confirmed XSS findings</td></tr>
+            <tr><td>14</td><td>SQLi Testing</td><td>sqlmap</td><td>SQL injection testing on injectable parameters</td><td>SQLi confirmations</td></tr>
+            <tr><td>15</td><td>LFI Testing</td><td>Custom</td><td>Local File Inclusion path traversal checks</td><td>LFI confirmations</td></tr>
+            <tr><td>16</td><td>API Security</td><td>autoswagger, RESTler</td><td>Swagger discovery + REST API fuzzing + robustness testing</td><td>API findings, bug buckets</td></tr>
+            <tr><td>17</td><td>Cloud Exposure</td><td>nuclei (custom templates)</td><td>AWS/GCP/Azure misconfiguration detection with weighted scoring</td><td>cloud_findings.jsonl</td></tr>
+            <tr><td>18</td><td>Reporting</td><td>Custom</td><td>Aggregate all results, compute final risk scores</td><td>Final manifest.json</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="tools">3. Tools & Dependencies</h2>
+    <div class="grid-2">
+        <div class="card">
+            <h3>Reconnaissance</h3>
+            <table>
+                <tr><td><code>subfinder</code></td><td>Passive subdomain discovery</td></tr>
+                <tr><td><code>puredns</code></td><td>DNS brute-force with massdns</td></tr>
+                <tr><td><code>massdns</code></td><td>High-performance DNS resolver</td></tr>
+                <tr><td><code>dnsx</code></td><td>DNS toolkit (A, AAAA, CNAME)</td></tr>
+                <tr><td><code>haktrails</code></td><td>SecurityTrails API wrapper</td></tr>
+                <tr><td><code>httpx</code></td><td>HTTP probing + tech detection</td></tr>
+                <tr><td><code>naabu</code></td><td>Fast port scanner</td></tr>
+                <tr><td><code>nmap</code></td><td>Service version fingerprinting</td></tr>
+            </table>
+        </div>
+        <div class="card">
+            <h3>Crawling & Discovery</h3>
+            <table>
+                <tr><td><code>katana</code></td><td>Active web crawler</td></tr>
+                <tr><td><code>gospider</code></td><td>Go-based web spider</td></tr>
+                <tr><td><code>gau</code></td><td>Passive URL fetcher (Wayback, CC, OTX)</td></tr>
+                <tr><td><code>dirsearch</code></td><td>Directory brute-forcer</td></tr>
+                <tr><td><code>ffuf</code></td><td>Fast web fuzzer</td></tr>
+                <tr><td><code>gf</code></td><td>Grep pattern matcher (params, secrets)</td></tr>
+            </table>
+        </div>
+        <div class="card">
+            <h3>Vulnerability Testing</h3>
+            <table>
+                <tr><td><code>nuclei</code></td><td>Template-based vuln scanner</td></tr>
+                <tr><td><code>dalfox</code></td><td>XSS scanner & validator</td></tr>
+                <tr><td><code>sqlmap</code></td><td>SQL injection detection</td></tr>
+                <tr><td><code>trufflehog</code></td><td>Secret/credential scanner</td></tr>
+                <tr><td><code>wafw00f</code></td><td>WAF fingerprinting</td></tr>
+            </table>
+        </div>
+        <div class="card">
+            <h3>API Security</h3>
+            <table>
+                <tr><td><code>autoswagger</code></td><td>Swagger/OpenAPI spec discovery</td></tr>
+                <tr><td><code>RESTler</code></td><td>REST API stateful fuzzing (Microsoft)</td></tr>
+            </table>
+            <h3>Platform</h3>
+            <table>
+                <tr><td><code>Python 3</code></td><td>Orchestrator + dashboard (Flask)</td></tr>
+                <tr><td><code>Bash</code></td><td>Pipeline scripting</td></tr>
+                <tr><td><code>Go tools</code></td><td>subfinder, httpx, nuclei, etc.</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <h2 id="risk-model">4. Risk Scoring Model</h2>
+    <p>ARISE uses a 6-domain composite risk model. Each host gets scored across these domains, clamped to 0–100:</p>
+    <table class="risk-table">
+        <thead><tr><th>Domain</th><th>Weight</th><th>Signals</th></tr></thead>
+        <tbody>
+            <tr><td><span class="badge b-crit">Vulnerability</span></td><td>35</td><td>Nuclei critical/high findings, confirmed SQLi/XSS/LFI</td></tr>
+            <tr><td><span class="badge b-high">Credential / Secret</span></td><td>25</td><td>Exposed API keys, tokens, passwords, service account keys</td></tr>
+            <tr><td><span class="badge b-med">Infrastructure Posture</span></td><td>20</td><td>Missing security headers, open sensitive ports, no WAF</td></tr>
+            <tr><td><span class="badge b-low">SSL / Domain</span></td><td>10</td><td>Dangling CNAMEs, expired certs, missing HSTS</td></tr>
+            <tr><td><span class="badge b-info">Attack Surface Breadth</span></td><td>10</td><td>Total exposed endpoints, subdomains, services</td></tr>
+            <tr><td style="color:var(--aws);font-weight:700">Cloud Exposure</td><td>40</td><td>Public buckets, exposed metadata, Terraform state, open K8s APIs</td></tr>
+        </tbody>
+    </table>
+    <div class="card">
+        <h3>Risk Bands</h3>
+        <table>
+            <tr><td><span class="badge b-crit">Critical</span></td><td>Score &ge; 70</td><td>Immediate remediation required</td></tr>
+            <tr><td><span class="badge b-high">High</span></td><td>Score 50–69</td><td>Prioritize for next sprint</td></tr>
+            <tr><td><span class="badge b-med">Medium</span></td><td>Score 30–49</td><td>Track and plan remediation</td></tr>
+            <tr><td><span class="badge b-low">Low</span></td><td>Score &lt; 30</td><td>Monitor during regular assessments</td></tr>
+        </table>
+        <h3>Port Risk Tiers</h3>
+        <table>
+            <tr><td><span class="badge b-crit">Tier 1 (Critical)</span></td><td>Redis (6379), Elasticsearch (9200/9300), MongoDB (27017), CouchDB (5984), Memcached (11211)</td></tr>
+            <tr><td><span class="badge b-high">Tier 2 (High)</span></td><td>MySQL (3306), PostgreSQL (5432), MSSQL (1433)</td></tr>
+            <tr><td><span class="badge b-med">Tier 3 (Medium)</span></td><td>RDP (3389), SSH (22), Telnet (23), SMB (445), FTP (21), SMTP (25), POP (110), IMAP (143)</td></tr>
+        </table>
+    </div>
+
+    <h2 id="cloud">5. Cloud Exposure Detection</h2>
+    <p>Module 17 runs custom nuclei templates against discovered hosts, then scores each finding with a weighted model:</p>
+    <pre><code>weighted_score = base_weight &times; exploitability &times; exposure</code></pre>
+    <div class="card">
+        <h3>Cloud Finding Categories</h3>
+        <table>
+            <thead><tr><th>Category</th><th>Base Weight</th><th>Examples</th></tr></thead>
+            <tbody>
+                <tr><td>metadata_service_exposure</td><td>40</td><td>AWS IMDS, GCP metadata endpoint</td></tr>
+                <tr><td>terraform_state_exposed</td><td>35</td><td>Public .tfstate files with secrets</td></tr>
+                <tr><td>public_kubernetes_api</td><td>35</td><td>Unauthenticated kubelet, K8s API</td></tr>
+                <tr><td>public_cicd</td><td>30</td><td>Exposed Jenkins, GitLab, ArgoCD</td></tr>
+                <tr><td>public_cloud_storage</td><td>25</td><td>Open S3 buckets, GCS buckets, Azure blobs</td></tr>
+                <tr><td>public_elasticsearch</td><td>25</td><td>Unauth Elasticsearch/OpenSearch</td></tr>
+                <tr><td>public_redis_mongo</td><td>25</td><td>Exposed Redis, MongoDB, Memcached</td></tr>
+                <tr><td>grafana_prometheus_exposed</td><td>20</td><td>Public Grafana dashboards, Prometheus metrics</td></tr>
+                <tr><td>debug_endpoint</td><td>20</td><td>Spring Actuator, PHP info, Werkzeug debugger</td></tr>
+                <tr><td>information_disclosure</td><td>10</td><td>Generic config/version leaks</td></tr>
+            </tbody>
+        </table>
+        <h3>Exposure Multiplier</h3>
+        <table>
+            <tr><td>Direct (no WAF/CDN)</td><td>&times; 1.0</td></tr>
+            <tr><td>Behind CDN</td><td>&times; 0.85</td></tr>
+            <tr><td>Behind WAF</td><td>&times; 0.6</td></tr>
+        </table>
+    </div>
+
+    <h2 id="api-security">6. API Security Testing</h2>
+    <div class="card">
+        <h3>Autoswagger</h3>
+        <ul>
+            <li>Discovers OpenAPI/Swagger specs automatically from known paths</li>
+            <li>Invocation: <code>autoswagger &lt;spec-url&gt; -json -risk</code></li>
+            <li><code>-json</code> is a boolean flag (output to stdout), <code>-risk</code> enables write-method testing</li>
+        </ul>
+        <h3>RESTler (Microsoft)</h3>
+        <ul>
+            <li>Stateful REST API fuzzing: compile &rarr; test &rarr; fuzz-lean &rarr; fuzz</li>
+            <li><code>--workingDirPath</code> is a global flag placed <b>before</b> the subcommand</li>
+            <li>RESTler is a <b>robustness oracle</b> — it detects HTTP 500s and internal errors, NOT auth bypasses</li>
+            <li>Parses results from <code>runSummary.json</code> and <code>errorBuckets.json</code> (JSON primary, text fallback)</li>
+            <li>Supports auth via <code>APISEC_AUTH_TOKEN_CMD</code> and <code>APISEC_AUTH_REFRESH_SEC</code> env vars</li>
+        </ul>
+    </div>
+
+    <h2 id="dashboard">7. Dashboard & API Endpoints</h2>
+    <p>The Flask dashboard serves at <code>http://localhost:5000</code> with these views:</p>
+    <div class="grid-2">
+        <div class="card">
+            <h3>Dashboard Tabs</h3>
+            <ul>
+                <li><b>Overview</b> — Risk gauge, severity rings, stat cards, tech wordcloud, top risk assets</li>
+                <li><b>Assets</b> — All discovered hosts with WAF, IP, status, risk band</li>
+                <li><b>Vulns</b> — All vulnerability findings across sources</li>
+                <li><b>CVEs</b> — EPSS-prioritized CVE listing</li>
+                <li><b>API</b> — API security findings (autoswagger + RESTler)</li>
+                <li><b>Cloud</b> — Cloud exposure with AWS/GCP/Azure provider detection</li>
+                <li><b>Ports</b> — Port scan results with service fingerprinting</li>
+                <li><b>Dirs</b> — Directory discovery results</li>
+                <li><b>Changes</b> — Diff between scans (new hosts, resolved, risk delta)</li>
+                <li><b>Pipeline</b> — Module execution status and timing</li>
+            </ul>
+        </div>
+        <div class="card">
+            <h3>REST API</h3>
+            <table>
+                <tr><td><code>GET /api/statistics</code></td><td>Aggregate stats</td></tr>
+                <tr><td><code>GET /api/risk</code></td><td>Risk score + grade</td></tr>
+                <tr><td><code>GET /api/executive</code></td><td>CXO summary</td></tr>
+                <tr><td><code>GET /api/hosts</code></td><td>All host rows</td></tr>
+                <tr><td><code>GET /api/host/{name}</code></td><td>Host detail</td></tr>
+                <tr><td><code>GET /api/vulnerabilities</code></td><td>All findings</td></tr>
+                <tr><td><code>GET /api/ports</code></td><td>Open ports</td></tr>
+                <tr><td><code>GET /api/services</code></td><td>Nmap fingerprints</td></tr>
+                <tr><td><code>GET /api/cloud</code></td><td>Cloud findings</td></tr>
+                <tr><td><code>GET /api/techstack</code></td><td>Tech detection</td></tr>
+                <tr><td><code>GET /api/cves</code></td><td>CVE listing</td></tr>
+                <tr><td><code>GET /api/api-security</code></td><td>API security</td></tr>
+                <tr><td><code>GET /api/modules</code></td><td>Pipeline status</td></tr>
+                <tr><td><code>GET /api/dirsearch</code></td><td>Dir results</td></tr>
+                <tr><td><code>GET /api/changes</code></td><td>Scan diff</td></tr>
+                <tr><td><code>GET /kt</code></td><td>This document</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <h2 id="operations">8. Operations & CLI</h2>
+    <pre><code># Full scan + dashboard
+python3 arise.py
+
+# Dashboard only (browse previous scans)
+python3 arise.py --dashboard-only
+
+# Scan only (no web UI)
+python3 arise.py --no-dashboard
+
+# Custom targets
+python3 arise.py --hosts targets.txt
+
+# Skip modules
+python3 arise.py --skip waf_detection --skip param_fuzzing
+
+# Dry run (preview execution order)
+python3 arise.py --dry-run
+
+# Custom dashboard port
+python3 arise.py --dashboard-port 8080
+
+# Tuning via env vars
+python3 arise.py --env PORT_SCAN_MODE=fast --env NAABU_RATE=5000</code></pre>
+
+    <div class="card">
+        <h3>Scan Directory Layout</h3>
+        <pre><code>scans/{domain}-{DDMMYY}-{HHMM}/
+├── manifest.json                    # Central state store
+├── logs/                            # Per-module execution logs
+├── 01_asset_discovery/              # Subdomain lists
+├── 02_subdomain_enumeration/        # Brute-force results
+├── 03_dns_resolution/               # Resolved IPs
+├── 04_http_discovery/               # http_confirmed.json + tech stack
+│   └── responses/                   # Raw HTTP responses
+├── 05_waf_detection/                # WAF fingerprints
+├── 06_crawling/                     # all_urls.txt
+├── 07_service_fingerprint/          # services.json (nmap)
+├── 08_directory_discovery/          # dirsearch results
+├── 09_secret_scanning/              # Credential findings
+├── 10_param_fuzzing/                # Discovered parameters
+├── 12_nuclei_scanning/              # Nuclei JSON output
+├── 13_xss_testing/                  # Dalfox results
+├── 14_sqli_testing/                 # SQLmap results
+├── 15_lfi_testing/                  # LFI results
+├── 16_api_security/                 # Autoswagger + RESTler output
+└── 17_cloud_exposure/               # cloud_findings.jsonl</code></pre>
+    </div>
+
+    <h2 id="tuning">9. Tuning & Configuration</h2>
+    <table>
+        <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+            <tr><td><code>PORT_SCAN_MODE</code></td><td>fast</td><td><code>fast</code> = top 1000 ports, <code>full</code> = all 65535</td></tr>
+            <tr><td><code>NAABU_RATE</code></td><td>1000</td><td>Packets/sec for port scanning</td></tr>
+            <tr><td><code>APISEC_AUTH_TOKEN_CMD</code></td><td>(empty)</td><td>Shell command to get API auth token for RESTler</td></tr>
+            <tr><td><code>APISEC_AUTH_REFRESH_SEC</code></td><td>300</td><td>Token refresh interval (seconds)</td></tr>
+            <tr><td><code>NUCLEI_THREADS</code></td><td>25</td><td>Parallel nuclei template execution</td></tr>
+            <tr><td><code>HTTPX_THREADS</code></td><td>100</td><td>HTTP probing concurrency</td></tr>
+        </tbody>
+    </table>
+
+    <div style="text-align:center;color:var(--text-faint);margin-top:48px;font-size:12px">
+        ARISE Knowledge Transfer Document &mdash; Generated for internal use
+    </div>
+</div>
+</body>
+</html>

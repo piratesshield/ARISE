@@ -1,1598 +1,1380 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ARISE - Summon Every Hidden Exposure.</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e0e0e0;
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        header {
-            text-align: center;
-            padding: 20px 0;
-            border-bottom: 2px solid #0f3460;
-            margin-bottom: 20px;
-        }
-
-        header h1 {
-            font-size: 2.5em;
-            background: linear-gradient(90deg, #00d4ff, #00ff88);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
-
-        /* Target Selector */
-        .target-selector {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-
-        .target-selector label {
-            font-size: 1.1em;
-            color: #00d4ff;
-        }
-
-        .target-dropdown {
-            padding: 12px 20px;
-            font-size: 1em;
-            border: 2px solid #0f3460;
-            border-radius: 25px;
-            background: rgba(22, 33, 62, 0.9);
-            color: #e0e0e0;
-            min-width: 250px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .target-dropdown:focus {
-            outline: none;
-            border-color: #00d4ff;
-            box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
-        }
-
-        .target-dropdown option {
-            background: #16213e;
-            padding: 10px;
-        }
-
-        .revision-selector {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 15px;
-            margin: -5px 0 20px;
-            flex-wrap: wrap;
-        }
-
-        .revision-selector label {
-            font-size: 0.95em;
-            color: #9fb5c7;
-        }
-
-        /* Status Bar */
-        .status-bar {
-            background: rgba(15, 52, 96, 0.6);
-            padding: 15px 25px;
-            border-radius: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.running { background: #ffd700; }
-        .status-dot.completed { background: #00ff88; animation: none; }
-        .status-dot.error { background: #ff6b6b; animation: none; }
-        .status-dot.no_data { background: #888; animation: none; }
-        .status-dot.completed_with_errors { background: #ff9500; animation: none; }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.2); }
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            border-radius: 10px;
-            padding: 20px;
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-
-        .stat-card:hover {
-            background: rgba(0, 212, 255, 0.1);
-            border-color: #00d4ff;
-            transform: translateY(-2px);
-        }
-
-        .stat-card.ports { border-left: 4px solid #8a2be2; }
-        .stat-card.services { border-left: 4px solid #32cd32; }
-
-        .stat-label {
-            color: #888;
-            font-size: 0.9em;
-            margin-bottom: 10px;
-        }
-
-        .stat-value {
-            color: #00d4ff;
-            font-size: 2.5em;
-            font-weight: bold;
-        }
-
-        .stat-unit {
-            color: #666;
-            font-size: 0.8em;
-        }
-
-        .comparison-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .comparison-card {
-            background: rgba(15, 52, 96, 0.32);
-            border: 1px solid rgba(0, 212, 255, 0.16);
-            border-radius: 8px;
-            padding: 14px;
-        }
-
-        .comparison-label {
-            color: #9fb5c7;
-            font-size: 0.82em;
-            margin-bottom: 8px;
-        }
-
-        .comparison-value {
-            color: #e0e0e0;
-            font-size: 1.35em;
-            font-weight: bold;
-        }
-
-        .comparison-value.positive { color: #00ff88; }
-        .comparison-value.negative { color: #ff6b6b; }
-
-        /* Navigation Tabs */
-        .nav-tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #0f3460;
-            padding-bottom: 10px;
-            overflow-x: auto;
-            flex-wrap: wrap;
-        }
-
-        .nav-tab {
-            padding: 10px 20px;
-            background: rgba(15, 52, 96, 0.3);
-            border: 1px solid #0f3460;
-            border-radius: 5px;
-            cursor: pointer;
-            color: #00d4ff;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .nav-tab.active {
-            background: rgba(0, 212, 255, 0.2);
-            border-color: #00d4ff;
-            color: #00ff88;
-        }
-
-        .nav-tab:hover {
-            background: rgba(0, 212, 255, 0.1);
-        }
-
-        /* Tab Content */
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        /* Table Styles */
-        .table-container {
-            overflow-x: auto;
-            background: rgba(15, 52, 96, 0.3);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th {
-            background: rgba(0, 212, 255, 0.2);
-            padding: 12px;
-            text-align: left;
-            color: #00d4ff;
-            border-bottom: 2px solid #0f3460;
-            cursor: pointer;
-        }
-
-        th:hover {
-            background: rgba(0, 212, 255, 0.3);
-        }
-
-        td {
-            padding: 12px;
-            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
-        }
-
-        tr:hover {
-            background: rgba(0, 212, 255, 0.05);
-        }
-
-        /* Status Badges */
-        .badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            font-weight: bold;
-        }
-
-        .badge-success { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
-        .badge-warning { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
-        .badge-danger { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
-        .badge-critical { background: rgba(255, 0, 85, 0.2); color: #ff0055; }
-        .badge-info { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
-
-        /* Risk band badges */
-        .risk-critical { background: rgba(255, 0, 85, 0.25); color: #ff0055; }
-        .risk-high { background: rgba(255, 107, 107, 0.25); color: #ff6b6b; }
-        .risk-medium { background: rgba(255, 165, 0, 0.25); color: #ffa500; }
-        .risk-low { background: rgba(0, 255, 136, 0.25); color: #00ff88; }
-
-        /* Vulnerability List */
-        .vuln-list {
-            list-style: none;
-        }
-
-        .vuln-item {
-            background: rgba(15, 52, 96, 0.4);
-            border-left: 4px solid #ff6b6b;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 5px;
-            transition: all 0.3s ease;
-        }
-
-        .vuln-item:hover {
-            background: rgba(15, 52, 96, 0.6);
-            transform: translateX(5px);
-        }
-
-        .vuln-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .vuln-title {
-            font-weight: bold;
-            color: #ff6b6b;
-        }
-
-        .vuln-details {
-            font-size: 0.9em;
-            color: #aaa;
-            margin-top: 8px;
-        }
-
-        .vuln-details strong {
-            color: #00d4ff;
-        }
-
-        /* Filter Buttons */
-        .filter-buttons {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-
-        .filter-btn {
-            padding: 8px 15px;
-            background: rgba(15, 52, 96, 0.3);
-            border: 1px solid #0f3460;
-            border-radius: 20px;
-            color: #00d4ff;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .filter-btn.active {
-            background: rgba(0, 212, 255, 0.3);
-            border-color: #00d4ff;
-            color: #00ff88;
-        }
-
-        .filter-btn:hover {
-            background: rgba(0, 212, 255, 0.1);
-        }
-
-        /* Search Box */
-        .search-box {
-            padding: 10px 15px;
-            background: rgba(15, 52, 96, 0.3);
-            border: 1px solid #0f3460;
-            border-radius: 25px;
-            color: #e0e0e0;
-            margin-bottom: 15px;
-            width: 100%;
-            max-width: 400px;
-        }
-
-        .search-box::placeholder {
-            color: #666;
-        }
-
-        /* Loading State */
-        .loading {
-            text-align: center;
-            color: #888;
-            padding: 20px;
-            font-style: italic;
-        }
-
-        /* Error State */
-        .error-message {
-            background: rgba(255, 107, 107, 0.1);
-            border: 1px solid #ff6b6b;
-            color: #ff6b6b;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 15px;
-        }
-
-        /* Warning Banner */
-        .warning-banner {
-            background: rgba(255, 165, 0, 0.15);
-            border: 1px solid #ffa500;
-            color: #ffa500;
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            display: none;
-        }
-
-        /* Executive Summary */
-        .exec-kpi-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-
-        .exec-kpi {
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            border-radius: 12px;
-            padding: 24px;
-            text-align: center;
-        }
-
-        .exec-kpi .kpi-value {
-            font-size: 3em;
-            font-weight: bold;
-            line-height: 1;
-        }
-
-        .exec-kpi .kpi-label {
-            color: #888;
-            font-size: 0.9em;
-            margin-top: 8px;
-        }
-
-        .exec-kpi .kpi-sub {
-            color: #666;
-            font-size: 0.8em;
-            margin-top: 4px;
-        }
-
-        .grade-A { color: #00ff88; border-color: #00ff88; }
-        .grade-B { color: #7fff00; border-color: #7fff00; }
-        .grade-C { color: #ffd700; border-color: #ffd700; }
-        .grade-D { color: #ff9500; border-color: #ff9500; }
-        .grade-F { color: #ff0055; border-color: #ff0055; }
-
-        /* Severity bar */
-        .severity-bar {
-            display: flex;
-            height: 24px;
-            border-radius: 12px;
-            overflow: hidden;
-            margin: 15px 0;
-            background: rgba(0, 0, 0, 0.3);
-        }
-
-        .severity-bar .seg-critical { background: #ff0055; }
-        .severity-bar .seg-high { background: #ff6b6b; }
-        .severity-bar .seg-medium { background: #ff9500; }
-        .severity-bar .seg-low { background: #ffd700; }
-        .severity-bar .seg-info { background: #00d4ff; }
-
-        .severity-legend {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-        }
-
-        .severity-legend .leg-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.85em;
-            color: #aaa;
-        }
-
-        .severity-legend .leg-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .priority-list {
-            list-style: none;
-        }
-
-        .priority-item {
-            background: rgba(15, 52, 96, 0.4);
-            border-left: 4px solid #ff0055;
-            padding: 12px 16px;
-            margin-bottom: 10px;
-            border-radius: 5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .priority-item .pri-text {
-            flex: 1;
-        }
-
-        .priority-item .pri-host {
-            color: #00d4ff;
-            font-size: 0.85em;
-        }
-
-        /* Trend chart */
-        .trend-container {
-            background: rgba(15, 52, 96, 0.3);
-            border-radius: 10px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-
-        .trend-bars {
-            display: flex;
-            align-items: flex-end;
-            gap: 8px;
-            height: 120px;
-            padding: 0 10px;
-        }
-
-        .trend-bar {
-            flex: 1;
-            min-width: 30px;
-            max-width: 60px;
-            border-radius: 4px 4px 0 0;
-            position: relative;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        .trend-bar:hover {
-            opacity: 0.8;
-        }
-
-        .trend-bar .trend-label {
-            position: absolute;
-            bottom: -22px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.65em;
-            color: #888;
-            white-space: nowrap;
-        }
-
-        .trend-bar .trend-score {
-            position: absolute;
-            top: -18px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.75em;
-            font-weight: bold;
-        }
-
-        /* Changes tab */
-        .change-section {
-            margin-bottom: 25px;
-        }
-
-        .change-section h3 {
-            color: #00d4ff;
-            margin-bottom: 10px;
-            font-size: 1.1em;
-        }
-
-        .change-list {
-            list-style: none;
-        }
-
-        .change-list li {
-            padding: 6px 12px;
-            margin-bottom: 4px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-
-        .change-added {
-            background: rgba(0, 255, 136, 0.1);
-            border-left: 3px solid #00ff88;
-            color: #00ff88;
-        }
-
-        .change-removed {
-            background: rgba(255, 107, 107, 0.1);
-            border-left: 3px solid #ff6b6b;
-            color: #ff6b6b;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .stats-grid { grid-template-columns: 1fr 1fr; }
-            .exec-kpi-grid { grid-template-columns: 1fr 1fr; }
-            .status-bar { flex-direction: column; align-items: flex-start; }
-            header h1 { font-size: 1.8em; }
-            table { font-size: 0.85em; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>ARISE</h1>
-            <p>Summon Every Hidden Exposure.</p>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARISE — Summon Every Hidden Exposure</title>
+<style>
+    :root {
+        --bg: #0b1020;
+        --bg-2: #0f152b;
+        --surface: #151c34;
+        --surface-2: #1b2440;
+        --border: #26304f;
+        --border-soft: #1f294699;
+        --text: #e8ecf7;
+        --text-dim: #9aa6c4;
+        --text-faint: #6b769a;
+        --accent: #4f8cff;
+        --accent-2: #7c5cff;
+        --grad: linear-gradient(135deg, #4f8cff 0%, #7c5cff 100%);
+        --crit: #ff4d6d;
+        --high: #ff8a3d;
+        --med: #ffc43d;
+        --low: #5ad1e0;
+        --info: #8b98bd;
+        --ok: #34d399;
+        --radius: 16px;
+        --shadow: 0 8px 30px rgba(0,0,0,.35);
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: var(--font);
+        background: radial-gradient(1200px 600px at 80% -10%, #172248 0%, transparent 60%), var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #2a3556; border-radius: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* Layout ---------------------------------------------------------- */
+    .app { display: flex; min-height: 100vh; }
+    .sidebar {
+        width: 76px; flex-shrink: 0;
+        background: var(--bg-2);
+        border-right: 1px solid var(--border);
+        display: flex; flex-direction: column; align-items: center;
+        padding: 18px 0; gap: 6px; position: sticky; top: 0; height: 100vh;
+    }
+    .logo {
+        width: 44px; height: 44px; border-radius: 12px; background: var(--grad);
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 20px; color: #fff; margin-bottom: 18px;
+        box-shadow: 0 6px 18px rgba(79,140,255,.4);
+    }
+    .nav-item {
+        width: 52px; height: 52px; border-radius: 12px; display: flex;
+        flex-direction: column; align-items: center; justify-content: center;
+        gap: 3px; color: var(--text-faint); cursor: pointer; transition: .15s;
+        font-size: 9.5px; font-weight: 600;
+    }
+    .nav-item svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+    .nav-item:hover { color: var(--text); background: var(--surface); }
+    .nav-item.active { color: #fff; background: var(--grad); box-shadow: 0 6px 16px rgba(79,140,255,.35); }
+
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+        display: flex; align-items: center; gap: 16px; padding: 18px 28px;
+        border-bottom: 1px solid var(--border); position: sticky; top: 0;
+        background: rgba(11,16,32,.85); backdrop-filter: blur(10px); z-index: 20;
+    }
+    .topbar h1 { font-size: 18px; font-weight: 700; letter-spacing: .2px; }
+    .topbar .sub { color: var(--text-faint); font-size: 12px; font-weight: 500; }
+    .topbar .spacer { flex: 1; }
+    .select-wrap { position: relative; }
+    select {
+        appearance: none; background: var(--surface); color: var(--text);
+        border: 1px solid var(--border); border-radius: 10px; padding: 9px 34px 9px 14px;
+        font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font);
+        max-width: 260px; text-overflow: ellipsis;
+    }
+    .select-wrap::after {
+        content: ""; position: absolute; right: 13px; top: 50%; width: 8px; height: 8px;
+        border-right: 2px solid var(--text-dim); border-bottom: 2px solid var(--text-dim);
+        transform: translateY(-70%) rotate(45deg); pointer-events: none;
+    }
+    .btn {
+        background: var(--surface); border: 1px solid var(--border); color: var(--text);
+        border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 600;
+        cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: .15s;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    .content { padding: 24px 28px 60px; }
+    .view { display: none; animation: fade .25s ease; }
+    .view.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* Cards ----------------------------------------------------------- */
+    .grid { display: grid; gap: 16px; }
+    .card {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+    }
+    .card h3 { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 14px;
+        display: flex; align-items: center; gap: 8px; letter-spacing: .3px; }
+    .card h3 .ico { color: var(--accent); display: flex; }
+    .card h3 svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+    .top-row { grid-template-columns: 300px 1fr; align-items: stretch; }
+    @media (max-width: 1100px) { .top-row { grid-template-columns: 1fr; } }
+
+    /* Risk gauge */
+    .gauge-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .gauge { position: relative; width: 200px; height: 200px; }
+    .gauge .label { position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; }
+    .gauge .grade { font-size: 46px; font-weight: 800; line-height: 1; }
+    .gauge .score { font-size: 13px; color: var(--text-dim); margin-top: 6px; font-weight: 600; }
+    .gauge-legend { margin-top: 8px; font-size: 12px; color: var(--text-faint); }
+
+    /* Metric strip inside vulnerabilities card */
+    .vuln-head { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+    .big-num { font-size: 42px; font-weight: 800; line-height: 1; }
+    .big-num small { font-size: 13px; color: var(--text-dim); font-weight: 600; display: block; margin-top: 4px; }
+    .sev-rings { display: flex; gap: 14px; flex-wrap: wrap; }
+    .sev-ring { position: relative; width: 62px; height: 62px; text-align: center; }
+    .sev-ring .n { position: absolute; inset: 0; display: flex; align-items: center;
+        justify-content: center; font-weight: 800; font-size: 16px; }
+    .sev-ring .cap { font-size: 10px; color: var(--text-faint); margin-top: 4px; text-transform: uppercase;
+        letter-spacing: .5px; font-weight: 700; }
+
+    /* Asset stat cards */
+    .stats-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); margin-top: 16px; }
+    .stat {
+        background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+        padding: 16px 18px; position: relative; overflow: hidden; transition: .15s; cursor: default;
+    }
+    .stat:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .stat .icn { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center;
+        justify-content: center; margin-bottom: 12px; background: rgba(79,140,255,.14); color: var(--accent); }
+    .stat .icn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.9; }
+    .stat .v { font-size: 28px; font-weight: 800; line-height: 1; }
+    .stat .k { font-size: 12px; color: var(--text-dim); margin-top: 6px; font-weight: 600; }
+
+    .cols-2 { grid-template-columns: 1fr 1fr; margin-top: 16px; }
+    .cols-3 { grid-template-columns: 1fr 1fr 1fr; margin-top: 16px; }
+    @media (max-width: 900px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+
+    /* Bars */
+    .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .bar-row .name { width: 78px; font-size: 12px; color: var(--text-dim); font-weight: 600; text-transform: capitalize; }
+    .bar-track { flex: 1; height: 10px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 6px; transition: width .5s ease; }
+    .bar-row .val { width: 40px; text-align: right; font-size: 13px; font-weight: 700; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+        text-align: left; padding: 12px 14px; color: var(--text-faint); font-weight: 700;
+        font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border);
+        position: sticky; top: 0; background: var(--surface);
+    }
+    tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+    tbody tr { transition: .12s; }
+    tbody tr.clickable { cursor: pointer; }
+    tbody tr.clickable:hover { background: var(--surface-2); }
+    .host-link { color: var(--accent); font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+    .host-link:hover { text-decoration: underline; }
+    .host-link .chev { opacity: .5; }
+
+    /* Badges & pills */
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700;
+        letter-spacing: .3px; }
+    .b-crit { background: rgba(255,77,109,.16); color: var(--crit); }
+    .b-high { background: rgba(255,138,61,.16); color: var(--high); }
+    .b-med { background: rgba(255,196,61,.16); color: var(--med); }
+    .b-low { background: rgba(90,209,224,.16); color: var(--low); }
+    .b-info { background: rgba(139,152,189,.16); color: var(--info); }
+    .b-ok { background: rgba(52,211,153,.16); color: var(--ok); }
+    .b-muted { background: var(--surface-2); color: var(--text-dim); }
+    .pill { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; background: var(--surface-2); color: var(--text-dim); }
+
+    .risk-chip { display: inline-flex; align-items: center; gap: 8px; }
+    .risk-dot { width: 9px; height: 9px; border-radius: 50%; }
+    .score-mini { font-weight: 800; }
+
+    .search {
+        background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+        padding: 10px 14px; color: var(--text); font-size: 13px; width: 280px; font-family: var(--font);
+    }
+    .search:focus { outline: none; border-color: var(--accent); }
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .chip { padding: 7px 13px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer;
+        background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); transition: .15s; }
+    .chip:hover { color: var(--text); }
+    .chip.active { background: var(--grad); color: #fff; border-color: transparent; }
+
+    .empty { text-align: center; padding: 50px 20px; color: var(--text-faint); }
+    .empty svg { width: 46px; height: 46px; stroke: currentColor; fill: none; stroke-width: 1.5; opacity: .5; margin-bottom: 14px; }
+
+    .banner { background: rgba(255,138,61,.12); border: 1px solid rgba(255,138,61,.35); color: #ffcba0;
+        padding: 12px 16px; border-radius: 12px; margin-bottom: 16px; font-size: 13px; display: none; }
+
+    /* Drill-down drawer ---------------------------------------------- */
+    .drawer-overlay {
+        position: fixed; inset: 0; background: rgba(5,8,18,.62); backdrop-filter: blur(3px);
+        opacity: 0; pointer-events: none; transition: .2s; z-index: 100;
+    }
+    .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+    .drawer {
+        position: fixed; top: 0; right: 0; height: 100vh; width: min(720px, 94vw);
+        background: var(--bg-2); border-left: 1px solid var(--border);
+        transform: translateX(100%); transition: transform .28s cubic-bezier(.4,0,.2,1);
+        z-index: 101; display: flex; flex-direction: column; box-shadow: -20px 0 60px rgba(0,0,0,.5);
+    }
+    .drawer.open { transform: none; }
+    .drawer-head { padding: 22px 24px; border-bottom: 1px solid var(--border); }
+    .drawer-head .row { display: flex; align-items: flex-start; gap: 14px; }
+    .drawer-title { font-size: 19px; font-weight: 800; word-break: break-all; }
+    .drawer-meta { color: var(--text-dim); font-size: 12.5px; margin-top: 6px; display: flex; gap: 14px; flex-wrap: wrap; }
+    .drawer-meta b { color: var(--text); font-weight: 700; }
+    .close-x { margin-left: auto; width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+        background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
+        display: flex; align-items: center; justify-content: center; font-size: 20px; line-height: 1; }
+    .close-x:hover { color: #fff; border-color: var(--accent); }
+    .drawer-sev { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+    .drawer-body { flex: 1; overflow-y: auto; padding: 18px 24px 40px; }
+
+    /* Tree */
+    .tree-node { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; overflow: hidden; background: var(--surface); }
+    .tree-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; user-select: none; }
+    .tree-head:hover { background: var(--surface-2); }
+    .tree-caret { width: 16px; height: 16px; transition: transform .2s; color: var(--text-dim); flex-shrink: 0; }
+    .tree-caret svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2.2; }
+    .tree-node.open .tree-caret { transform: rotate(90deg); }
+    .tree-cat-name { font-weight: 700; font-size: 14px; }
+    .tree-cat-count { margin-left: auto; }
+    .tree-children { display: none; border-top: 1px solid var(--border-soft); }
+    .tree-node.open .tree-children { display: block; }
+    .leaf { padding: 14px 16px 14px 44px; border-bottom: 1px solid var(--border-soft); position: relative; }
+    .leaf:last-child { border-bottom: none; }
+    .leaf::before { content: ""; position: absolute; left: 24px; top: 22px; width: 12px; height: 1px; background: var(--border); }
+    .leaf-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .leaf-title { font-weight: 700; font-size: 13.5px; }
+    .leaf-detail { margin-top: 8px; font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+    .leaf-detail > div { margin-bottom: 3px; }
+    .leaf-detail .lbl { color: var(--text-faint); font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .5px; margin-right: 6px; }
+    .leaf-url { color: var(--accent); word-break: break-all; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+    .sev-stripe { width: 4px; align-self: stretch; border-radius: 4px; }
+
+    /* Cloud score bar */
+    .score-bar { display: inline-flex; align-items: center; gap: 8px; min-width: 110px; }
+    .score-bar-track { width: 60px; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 4px; }
+    .score-val { font-weight: 800; font-size: 13px; font-variant-numeric: tabular-nums; min-width: 28px; }
+    .model-tag { font-size: 10px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+    .port-risk-crit { color: var(--crit); font-weight: 700; }
+    .port-risk-high { color: var(--high); font-weight: 700; }
+    .port-risk-med { color: var(--med); font-weight: 600; }
+    .port-risk-low { color: var(--text-dim); }
+    .fingerprint { color: var(--text-dim); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+    /* Tech wordcloud */
+    .tech-word { position:absolute; cursor:default; font-weight:700; white-space:nowrap; transition:transform .15s,opacity .15s; }
+    .tech-word:hover { transform:scale(1.18); z-index:10; opacity:1 !important; }
+    .tech-legend-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--text-dim); }
+    .tech-legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+    /* Cloud provider badges */
+    .provider-icon { width:18px; height:18px; vertical-align:middle; display:inline-block; flex-shrink:0; }
+    .provider-badge { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; }
+    .provider-aws { background:rgba(255,153,0,.12); color:#ff9900; }
+    .provider-gcp { background:rgba(66,133,244,.12); color:#4285f4; }
+    .provider-azure { background:rgba(0,120,212,.12); color:#0078d4; }
+    .provider-multi { background:rgba(127,127,255,.12); color:#7c5cff; }
+    .provider-unknown { background:var(--surface-2); color:var(--text-dim); }
+
+    .loading { text-align: center; padding: 60px; color: var(--text-faint); }
+    .spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--accent);
+        border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 14px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div class="app">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="logo">A</div>
+        <div class="nav-item active" data-view="overview">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span>Overview</span>
+        </div>
+        <div class="nav-item" data-view="assets">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+            <span>Assets</span>
+        </div>
+        <div class="nav-item" data-view="vulns">
+            <svg viewBox="0 0 24 24"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/><path d="M12 8v4M12 16h.01"/></svg>
+            <span>Vulns</span>
+        </div>
+        <div class="nav-item" data-view="cves">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15h6"/></svg>
+            <span>CVEs</span>
+        </div>
+        <div class="nav-item" data-view="apisec">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+            <span>API</span>
+        </div>
+        <div class="nav-item" data-view="cloud">
+            <svg viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/><path d="M8 14.5l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Cloud</span>
+        </div>
+        <div class="nav-item" data-view="ports">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h.01M11 8h.01M7 12h6"/></svg>
+            <span>Ports</span>
+        </div>
+        <div class="nav-item" data-view="dirs">
+            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span>Dirs</span>
+        </div>
+        <div class="nav-item" data-view="changes">
+            <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+            <span>Changes</span>
+        </div>
+        <div class="nav-item" data-view="modules">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17h7M17.5 14v6"/></svg>
+            <span>Pipeline</span>
+        </div>
+    </nav>
+
+    <!-- Main -->
+    <div class="main">
+        <header class="topbar">
+            <div>
+                <h1>ARISE <span class="sub">External Attack Surface</span></h1>
+            </div>
+            <div class="spacer"></div>
+            <div class="select-wrap"><select id="targetDropdown"></select></div>
+            <div class="select-wrap"><select id="revisionDropdown"></select></div>
+            <button class="btn" id="refreshBtn">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                Refresh
+            </button>
         </header>
 
-        <!-- Target Selector -->
-        <div class="target-selector">
-            <label for="targetDropdown">Select Target:</label>
-            <select id="targetDropdown" class="target-dropdown">
-                <option value="">Loading targets...</option>
-            </select>
-        </div>
+        <div class="content">
+            <div class="banner" id="portScanWarning">⚠️ Port scan crashed on this run — port data may be incomplete.</div>
 
-        <div class="revision-selector">
-            <label for="revisionDropdown">Revision:</label>
-            <select id="revisionDropdown" class="target-dropdown">
-                <option value="">Latest scan</option>
-            </select>
-        </div>
-
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <div class="status-indicator">
-                <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Status: Loading...</span>
-            </div>
-            <div id="scanInfo" style="color: #888; font-size: 0.9em;"></div>
-        </div>
-
-        <div class="comparison-grid">
-            <div class="comparison-card">
-                <div class="comparison-label">New Hosts</div>
-                <div class="comparison-value positive" id="cmpNewHosts">0</div>
-            </div>
-            <div class="comparison-card">
-                <div class="comparison-label">Removed Hosts</div>
-                <div class="comparison-value negative" id="cmpRemovedHosts">0</div>
-            </div>
-            <div class="comparison-card">
-                <div class="comparison-label">New Ports</div>
-                <div class="comparison-value positive" id="cmpNewPorts">0</div>
-            </div>
-            <div class="comparison-card">
-                <div class="comparison-label">Removed Ports</div>
-                <div class="comparison-value negative" id="cmpRemovedPorts">0</div>
-            </div>
-            <div class="comparison-card">
-                <div class="comparison-label">New Findings</div>
-                <div class="comparison-value positive" id="cmpNewVulns">0</div>
-            </div>
-            <div class="comparison-card">
-                <div class="comparison-label">Removed Findings</div>
-                <div class="comparison-value negative" id="cmpRemovedVulns">0</div>
-            </div>
-        </div>
-
-        <!-- Statistics Grid -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Total Hosts</div>
-                <div class="stat-value" id="statTotalHosts">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Resolved Hosts</div>
-                <div class="stat-value" id="statResolvedHosts">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">HTTP Hosts</div>
-                <div class="stat-value" id="statHttpHosts">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">WAF Protected</div>
-                <div class="stat-value" id="statWafHosts">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Vulnerabilities</div>
-                <div class="stat-value" id="statVulnerabilities">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Non-HTTP Services</div>
-                <div class="stat-value" id="statNonHttpServices">0</div>
-            </div>
-            <div class="stat-card ports">
-                <div class="stat-label">Open Ports</div>
-                <div class="stat-value" id="statOpenPorts">0</div>
-            </div>
-            <div class="stat-card services">
-                <div class="stat-label">Fingerprinted Services</div>
-                <div class="stat-value" id="statFingerprintedServices">0</div>
-            </div>
-        </div>
-
-        <!-- Navigation Tabs -->
-        <div class="nav-tabs">
-            <div class="nav-tab active" data-tab="executive">Executive Summary</div>
-            <div class="nav-tab" data-tab="hosts">Hosts</div>
-            <div class="nav-tab" data-tab="vulnerabilities">Vulnerabilities</div>
-            <div class="nav-tab" data-tab="cves">CVEs</div>
-            <div class="nav-tab" data-tab="ports">Ports</div>
-            <div class="nav-tab" data-tab="changes">Changes</div>
-            <div class="nav-tab" data-tab="dirsearch">Directories</div>
-            <div class="nav-tab" data-tab="modules">Modules</div>
-        </div>
-
-        <!-- EXECUTIVE SUMMARY TAB -->
-        <div id="executive" class="tab-content active">
-            <div class="exec-kpi-grid" id="execKpis">
-                <div class="exec-kpi" id="kpiRiskScore">
-                    <div class="kpi-value" id="execRiskScore">--</div>
-                    <div class="kpi-label">Risk Score</div>
-                    <div class="kpi-sub" id="execGrade"></div>
+            <!-- OVERVIEW ------------------------------------------------ -->
+            <section class="view active" id="view-overview">
+                <div class="grid top-row">
+                    <div class="card gauge-card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></span> Overall Risk</h3>
+                        <div class="gauge" id="riskGauge"></div>
+                        <div class="gauge-legend" id="riskLegend">Composite exposure score</div>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/><path d="M12 8v4M12 16h.01"/></svg></span> Total Vulnerabilities</h3>
+                        <div class="vuln-head">
+                            <div class="big-num" id="vulnTotal">0<small>findings detected</small></div>
+                            <div class="sev-rings" id="sevRings"></div>
+                        </div>
+                        <div style="margin-top:22px">
+                            <div class="bar-row"><div class="name">Assets</div><div class="bar-track"><div class="bar-fill" id="barAssets" style="background:linear-gradient(135deg,#4f8cff,#7c5cff);width:0"></div></div><div class="val" id="valAssets">0</div></div>
+                            <div class="bar-row"><div class="name">WAF cover</div><div class="bar-track"><div class="bar-fill" id="barWaf" style="background:#34d399;width:0"></div></div><div class="val" id="valWaf">0%</div></div>
+                            <div class="bar-row"><div class="name">Headers</div><div class="bar-track"><div class="bar-fill" id="barHeaders" style="background:#ffc43d;width:0"></div></div><div class="val" id="valHeaders">0%</div></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="exec-kpi">
-                    <div class="kpi-value" style="color:#ff0055;" id="execCritical">0</div>
-                    <div class="kpi-label">Critical Findings</div>
+
+                <div class="grid stats-grid" id="statsGrid"></div>
+
+                <div class="grid cols-2">
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span> Severity Distribution</h3>
+                        <div id="sevBars"></div>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 3"/></svg></span> Risk Band Breakdown</h3>
+                        <div id="bandBars"></div>
+                    </div>
                 </div>
-                <div class="exec-kpi">
-                    <div class="kpi-value" style="color:#00d4ff;" id="execAssets">0</div>
-                    <div class="kpi-label">Internet-Facing Assets</div>
+
+                <div class="grid" style="margin-top:16px">
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="20" cy="17" r="2"/></svg></span> Tech Stack</h3>
+                        <div id="techCloud" style="position:relative;width:100%;height:260px;overflow:hidden"></div>
+                        <div id="techLegend" style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:10px"></div>
+                    </div>
                 </div>
-                <div class="exec-kpi">
-                    <div class="kpi-value" id="execWafCoverage">0%</div>
-                    <div class="kpi-label">WAF Coverage</div>
-                    <div class="kpi-sub" id="execWafDetail"></div>
+
+                <div class="grid" style="margin-top:16px">
+                    <div class="card">
+                        <h3 style="justify-content:space-between"><span style="display:flex;align-items:center;gap:8px"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></span> Top Risk Assets</span><span class="pill" style="cursor:pointer" id="seeAllAssets">View all →</span></h3>
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Asset</th><th>IP</th><th>Status</th><th>WAF</th><th>Findings</th><th>Risk</th></tr></thead>
+                                <tbody id="topRiskBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                <div class="exec-kpi">
-                    <div class="kpi-value" id="execDelta">--</div>
-                    <div class="kpi-label">Change Since Last Scan</div>
-                    <div class="kpi-sub" id="execDeltaDetail"></div>
+            </section>
+
+            <!-- ASSETS -------------------------------------------------- -->
+            <section class="view" id="view-assets">
+                <div class="toolbar">
+                    <input class="search" id="assetSearch" placeholder="Search host or IP…">
+                    <div class="chip active" data-filter="all">All</div>
+                    <div class="chip" data-filter="http">Web</div>
+                    <div class="chip" data-filter="waf">WAF</div>
+                    <div class="chip" data-filter="api">API</div>
+                    <div class="chip" data-filter="cdn">CDN</div>
+                    <div class="chip" data-filter="dangling">Dangling</div>
                 </div>
-            </div>
-
-            <h3 style="color:#00d4ff; margin-bottom:10px;">Findings by Severity</h3>
-            <div class="severity-bar" id="execSeverityBar"></div>
-            <div class="severity-legend" id="execSeverityLegend"></div>
-
-            <h3 style="color:#ff6b6b; margin: 20px 0 10px;">Top Remediation Priorities</h3>
-            <ul class="priority-list" id="execPriorities">
-                <li class="loading">Loading...</li>
-            </ul>
-
-            <div class="trend-container">
-                <h3 style="color:#00d4ff; margin-bottom:15px;">Risk Score Trend</h3>
-                <div class="trend-bars" id="execTrendBars"></div>
-            </div>
-        </div>
-
-        <!-- HOSTS TAB -->
-        <div id="hosts" class="tab-content">
-            <div>
-                <input type="text" id="searchBox" class="search-box" placeholder="Search hosts by name or IP...">
-            </div>
-            <div class="filter-buttons">
-                <button class="filter-btn active" data-filter="all">All</button>
-                <button class="filter-btn" data-filter="resolved">Resolved</button>
-                <button class="filter-btn" data-filter="http">HTTP</button>
-                <button class="filter-btn" data-filter="waf">WAF Protected</button>
-                <button class="filter-btn" data-filter="cdn">CDN</button>
-            </div>
-            <div class="table-container">
-                <table id="hostsTable">
-                    <thead>
-                        <tr>
-                            <th data-sort="risk_score">Risk</th>
-                            <th data-sort="host">Host</th>
-                            <th data-sort="ip">IP Address</th>
-                            <th data-sort="http_status">HTTP Status</th>
-                            <th>WAF</th>
-                            <th>CDN</th>
-                            <th data-sort="security_score">Sec Headers</th>
-                            <th>Server</th>
-                        </tr>
-                    </thead>
-                    <tbody id="hostsTableBody">
-                        <tr><td colspan="8" class="loading">Loading hosts...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- VULNERABILITIES TAB -->
-        <div id="vulnerabilities" class="tab-content">
-            <ul class="vuln-list" id="vulnsList">
-                <li class="loading">Loading vulnerabilities...</li>
-            </ul>
-        </div>
-
-        <!-- CVEs TAB -->
-        <div id="cves" class="tab-content">
-            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:20px;">
-                <div class="stat-card">
-                    <div class="stat-label">Unique CVEs</div>
-                    <div class="stat-value" id="cveTotal">0</div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Asset</th><th>IP</th><th>Status</th><th>Server</th><th>WAF</th><th>Ports</th><th>Findings</th><th>Risk</th></tr></thead>
+                            <tbody id="assetsBody"></tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Critical CVEs</div>
-                    <div class="stat-value" style="color:#ff0055;" id="cveCritical">0</div>
+            </section>
+
+            <!-- VULNS --------------------------------------------------- -->
+            <section class="view" id="view-vulns">
+                <div class="toolbar">
+                    <input class="search" id="vulnSearch" placeholder="Search finding, host or CVE…">
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Most Widespread</div>
-                    <div class="stat-value" style="font-size:1em; color:#ffa500;" id="cveMostWidespread">--</div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Severity</th><th>Finding</th><th>Host</th><th>Source</th><th>Location</th></tr></thead>
+                            <tbody id="vulnsBody"></tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>CVE ID</th>
-                            <th>Severity</th>
-                            <th>Affected Hosts</th>
-                            <th>Template</th>
-                            <th>CWE</th>
-                        </tr>
-                    </thead>
-                    <tbody id="cvesTableBody">
-                        <tr><td colspan="5" class="loading">Loading CVEs...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+            </section>
 
-        <!-- PORTS TAB -->
-        <div id="ports" class="tab-content">
-            <div class="warning-banner" id="portScanWarning">
-                Port scan failed (naabu crashed due to thread limits). Port data is incomplete. Re-run with PORT_SCAN_MODE=fast.
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Port</th>
-                            <th>Host Count</th>
-                            <th>Services</th>
-                        </tr>
-                    </thead>
-                    <tbody id="portsTableBody">
-                        <tr><td colspan="3" class="loading">Loading ports...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+            <!-- CLOUD --------------------------------------------------- -->
+            <section class="view" id="view-cloud">
+                <div id="cloudProviderBar" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap"></div>
+                <div class="grid stats-grid" id="cloudStats" style="margin-top:0"></div>
+                <div class="grid cols-2" id="cloudBreakdown"></div>
+                <div class="toolbar" style="margin-top:16px">
+                    <input class="search" id="cloudSearch" placeholder="Search host, category or evidence…">
+                    <div class="chip active" data-cloudsev="all">All</div>
+                    <div class="chip" data-cloudsev="critical">Critical</div>
+                    <div class="chip" data-cloudsev="high">High</div>
+                    <div class="chip" data-cloudsev="medium">Medium</div>
+                </div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Score</th><th>Category</th><th>Host</th><th>Severity</th><th>Model</th><th>Tool</th><th>Evidence</th></tr></thead>
+                            <tbody id="cloudBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
 
-        <!-- CHANGES TAB -->
-        <div id="changes" class="tab-content">
-            <div id="changesContent">
-                <p class="loading">Loading changes...</p>
-            </div>
-        </div>
+            <!-- PORTS + SERVICES ---------------------------------------- -->
+            <section class="view" id="view-ports">
+                <div class="grid stats-grid" id="portStats" style="margin-top:0"></div>
+                <div class="grid cols-2" id="portBreakdown"></div>
+                <div class="toolbar" style="margin-top:16px">
+                    <input class="search" id="portSearch" placeholder="Search host, port or service…">
+                    <div class="chip active" data-portrisk="all">All</div>
+                    <div class="chip" data-portrisk="critical">Critical</div>
+                    <div class="chip" data-portrisk="high">High</div>
+                    <div class="chip" data-portrisk="medium">Medium</div>
+                </div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Port</th><th>Service</th><th>Product / Version</th><th>Host</th><th>IP</th><th>WAF</th><th>Risk</th></tr></thead>
+                            <tbody id="portsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
 
-        <!-- DIRSEARCH TAB -->
-        <div id="dirsearch" class="tab-content">
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>URL</th>
-                            <th>Status Code</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dirsearchTableBody">
-                        <tr><td colspan="2" class="loading">Loading directories...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+            <!-- CVES ---------------------------------------------------- -->
+            <section class="view" id="view-cves">
+                <div class="grid cols-3" style="margin-top:0" id="cveSummary"></div>
+                <div class="card" style="margin-top:16px;padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>CVE</th><th>Severity</th><th>Affected Hosts</th><th>Template</th><th>CWE</th></tr></thead>
+                            <tbody id="cvesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
 
-        <!-- MODULES TAB -->
-        <div id="modules" class="tab-content">
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Module</th>
-                            <th>Status</th>
-                            <th>Data Count</th>
-                        </tr>
-                    </thead>
-                    <tbody id="modulesTableBody">
-                        <tr><td colspan="3" class="loading">Loading modules...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            <!-- API SECURITY -------------------------------------------- -->
+            <section class="view" id="view-apisec">
+                <div class="grid stats-grid" id="apisecStats" style="margin-top:0"></div>
+                <div class="grid cols-2" id="apisecBreakdown"></div>
+                <div class="toolbar" style="margin-top:16px">
+                    <div class="chip active" data-tool="all">All Tools</div>
+                    <div class="chip" data-tool="autoswagger">Autoswagger · auth/authz</div>
+                    <div class="chip" data-tool="restler">RESTler · robustness</div>
+                    <input class="search" id="apisecSearch" placeholder="Search endpoint or issue…" style="margin-left:auto">
+                </div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Endpoint</th><th>Issue</th><th>Category</th><th>Severity</th><th>Tool</th><th>Evidence</th></tr></thead>
+                            <tbody id="apisecBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DIRECTORIES --------------------------------------------- -->
+            <section class="view" id="view-dirs">
+                <div class="toolbar">
+                    <div class="chip active" data-dir="all">All</div>
+                    <div class="chip" data-dir="200">200 OK</div>
+                    <div class="chip" data-dir="403">403 Forbidden</div>
+                    <div class="chip" data-dir="500">500 Error</div>
+                    <input class="search" id="dirSearch" placeholder="Search path…" style="margin-left:auto">
+                </div>
+                <div class="card" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>URL</th><th>Status</th></tr></thead>
+                            <tbody id="dirsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CHANGES ------------------------------------------------- -->
+            <section class="view" id="view-changes">
+                <div class="grid cols-3" id="changesSummary" style="margin-top:0"></div>
+                <div class="card" style="margin-top:16px">
+                    <h3>Change Detail</h3>
+                    <div id="changesDetail"></div>
+                </div>
+            </section>
+
+            <!-- MODULES / PIPELINE -------------------------------------- -->
+            <section class="view" id="view-modules">
+                <div class="grid stats-grid" id="modulesGrid" style="margin-top:0"></div>
+            </section>
         </div>
     </div>
+</div>
 
-    <script>
-        const API_BASE = '';
-        let currentTarget = null;
-        let currentTargetKey = null;
-        let currentFilter = 'all';
-        let hostSortField = 'risk_score';
-        let hostSortAsc = false;
-        let cachedHosts = [];
+<!-- Drill-down drawer -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="drawer" id="drawer">
+    <div class="drawer-head" id="drawerHead"></div>
+    <div class="drawer-body" id="drawerBody"></div>
+</aside>
 
-        function getApiUrl(endpoint) {
-            const params = new URLSearchParams();
-            if (currentTarget) params.append('target', currentTarget);
-            const separator = endpoint.includes('?') ? '&' : '?';
-            return API_BASE + endpoint + (currentTarget ? separator + params.toString() : '');
+<script>
+/* =====================================================================
+   ARISE Dashboard — modern EASM view + host drill-down tree
+   ===================================================================== */
+const API_BASE = '';
+let currentTargetKey = null;
+let currentTarget = null;      // scan id
+let cache = { hosts: [], vulns: [], ports: [], stats: {}, risk: {}, exec: {},
+              cves: [], apisec: {summary:{}, findings:[]}, dirs: [], modules: {},
+              cloud: {total:0, by_severity:{}, categories:[], findings:[]},
+              services: {services:[], summary:{}} };
+let assetFilter = 'all';
+let apisecTool = 'all';
+let dirFilter = 'all';
+let cloudSevFilter = 'all';
+let portRiskFilter = 'all';
+
+function api(endpoint) {
+    const sep = endpoint.includes('?') ? '&' : '?';
+    return API_BASE + endpoint + (currentTarget ? sep + 'target=' + encodeURIComponent(currentTarget) : '');
+}
+async function getJSON(endpoint) {
+    try { const r = await fetch(api(endpoint)); return await r.json(); }
+    catch (e) { console.error(endpoint, e); return null; }
+}
+
+const SEV = ['critical','high','medium','low','info'];
+const sevColor = s => ({critical:'#ff4d6d',high:'#ff8a3d',medium:'#ffc43d',low:'#5ad1e0',info:'#8b98bd'})[s] || '#8b98bd';
+const sevClass = s => 'b-' + ({critical:'crit',high:'high',medium:'med',low:'low',info:'info'})[s || 'info'];
+const bandColor = b => ({critical:'#ff4d6d',high:'#ff8a3d',medium:'#ffc43d',low:'#5ad1e0'})[b] || '#5ad1e0';
+function gradeColor(g){ return {A:'#34d399',B:'#5ad1e0',C:'#ffc43d',D:'#ff8a3d',F:'#ff4d6d'}[g] || '#ffc43d'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function attr(s){ return esc(s).replace(/`/g,'&#96;'); }
+
+/* ---- Donut / ring helpers ---- */
+function donut(size, stroke, segments, centerHTML, trackColor) {
+    const r = (size - stroke) / 2, c = 2 * Math.PI * r, cx = size/2;
+    const total = segments.reduce((a,s)=>a+s.value,0) || 1;
+    let off = 0, arcs = '';
+    segments.forEach(s => {
+        const len = (s.value/total)*c;
+        arcs += `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-linecap="butt" stroke-dasharray="${len} ${c-len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cx})"/>`;
+        off += len;
+    });
+    const track = `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${trackColor||'#1b2440'}" stroke-width="${stroke}"/>`;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${track}${arcs}</svg>` +
+           (centerHTML ? `<div class="label">${centerHTML}</div>` : '');
+}
+
+/* =====================================================================
+   TARGET / REVISION SELECTION
+   ===================================================================== */
+async function loadTargets() {
+    const prevKey = currentTargetKey, prevScan = currentTarget;
+    const targets = await (await fetch(API_BASE + '/api/targets')).json();
+    const dd = document.getElementById('targetDropdown');
+    dd.innerHTML = '';
+    if (!targets || !targets.length) { dd.innerHTML = '<option>No scans available</option>'; return; }
+    targets.forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = t.name + (t.revision_count > 1 ? ' · ' + t.revision_count + ' scans' : '');
+        dd.appendChild(o);
+    });
+    const sel = targets.find(t => t.id === prevKey) || targets[0];
+    currentTargetKey = sel.id;
+    currentTarget = (prevKey === sel.id && prevScan) ? prevScan : (sel.latest_scan_id || sel.scan_id || sel.id);
+    dd.value = currentTargetKey;
+    await loadRevisions(false);
+}
+async function loadRevisions(forceLatest) {
+    const dd = document.getElementById('revisionDropdown');
+    if (!currentTargetKey) { dd.innerHTML = '<option>—</option>'; return; }
+    const revs = await (await fetch(API_BASE + '/api/targets/history?target=' + encodeURIComponent(currentTargetKey))).json();
+    dd.innerHTML = '';
+    if (!revs || !revs.length) { dd.innerHTML = '<option>No revisions</option>'; return; }
+    if (forceLatest || !revs.some(r => r.id === currentTarget)) currentTarget = revs[0].id;
+    revs.forEach((r, i) => {
+        const o = document.createElement('option');
+        o.value = r.id;
+        const label = r.start_time ? new Date(r.start_time).toLocaleString() : r.id;
+        o.textContent = (i === 0 ? 'Latest' : 'Rev') + ' · ' + label;
+        dd.appendChild(o);
+    });
+    dd.value = currentTarget;
+}
+
+/* =====================================================================
+   DATA LOAD + RENDER
+   ===================================================================== */
+async function reloadAll() {
+    const [stats, risk, ex, hosts, vulns, ports, cves, apisec, dirs, modules, cloud, services, techstack] = await Promise.all([
+        getJSON('/api/statistics'), getJSON('/api/risk'), getJSON('/api/executive'),
+        getJSON('/api/hosts'), getJSON('/api/vulnerabilities'), getJSON('/api/ports'),
+        getJSON('/api/cves'), getJSON('/api/api-security'), getJSON('/api/dirsearch'), getJSON('/api/modules'),
+        getJSON('/api/cloud'), getJSON('/api/services'), getJSON('/api/techstack')
+    ]);
+    cache = {
+        stats: stats || {}, risk: risk || {}, exec: ex || {},
+        hosts: hosts || [], vulns: vulns || [], ports: ports || [],
+        cves: cves || [], apisec: apisec || {summary:{}, findings:[]},
+        dirs: dirs || [], modules: modules || {},
+        cloud: cloud || {total:0, by_severity:{}, categories:[], findings:[]},
+        services: services || {services:[], summary:{}},
+        techstack: techstack || {technologies:[], by_category:{}, total_hosts:0}
+    };
+    renderOverview();
+    renderAssets();
+    renderVulns();
+    renderPorts();
+    renderCves();
+    renderApiSec();
+    renderCloud();
+    renderDirs();
+    renderModules();
+    loadChanges();
+}
+
+function renderOverview() {
+    const s = cache.stats, risk = cache.risk, ex = cache.exec;
+
+    // Port scan warning
+    document.getElementById('portScanWarning').style.display =
+        (s.port_scan_status === 'crashed') ? 'block' : 'none';
+
+    // Risk gauge
+    const grade = risk.grade || 'C';
+    const score = risk.org_score || 0;
+    const gc = gradeColor(grade);
+    document.getElementById('riskGauge').innerHTML = donut(200, 18,
+        [{value: score, color: gc}, {value: Math.max(100-score,0), color: '#1b2440'}],
+        `<div class="grade" style="color:${gc}">${grade}</div><div class="score">${score}/100 risk</div>`, '#1b2440');
+    const bands = risk.band_distribution || {};
+    document.getElementById('riskLegend').innerHTML =
+        `${bands.critical||0} critical · ${bands.high||0} high · ${bands.medium||0} medium assets`;
+
+    // Vulnerabilities
+    const sev = (ex.findings && ex.findings.by_severity) || {};
+    const totalV = SEV.reduce((a,k)=>a+(sev[k]||0),0);
+    document.getElementById('vulnTotal').innerHTML = totalV + '<small>findings detected</small>';
+    document.getElementById('sevRings').innerHTML = ['critical','high','medium','low'].map(k => {
+        const n = sev[k]||0;
+        return `<div><div class="sev-ring">${donut(62,7,[{value:n||0,color:sevColor(k)},{value:n?0:1,color:'#1b2440'}],`<span class="n" style="color:${sevColor(k)}">${n}</span>`)}</div><div class="cap">${k}</div></div>`;
+    }).join('');
+
+    // bars
+    const assets = s.total_hosts || cache.hosts.length || 0;
+    const exp = ex.exposure || {};
+    const wafPct = exp.waf_coverage_pct || 0;
+    const httpHosts = exp.internet_facing_http || s.http_hosts || 0;
+    let hsum = 0, hn = 0;
+    cache.hosts.forEach(h => { if (h.http_status) { hsum += (h.security_score||0); hn++; } });
+    const hdrPct = hn ? Math.round((hsum/(hn*6))*100) : 0;
+    setBar('barAssets','valAssets', 100, assets);
+    setBar('barWaf','valWaf', wafPct, wafPct + '%');
+    setBar('barHeaders','valHeaders', hdrPct, hdrPct + '%');
+
+    // stat cards
+    const cards = [
+        ['Assets', assets, 'globe'],
+        ['Resolved', s.resolved_hosts||0, 'check'],
+        ['Web Services', httpHosts, 'web'],
+        ['WAF Protected', s.waf_hosts||0, 'shield'],
+        ['Open Ports', s.total_ports||s.open_ports||0, 'port'],
+        ['APIs', cache.hosts.filter(h=>h.is_api).length, 'api'],
+        ['CDN Fronted', exp.cdn_fronted||cache.hosts.filter(h=>h.cdn).length, 'cloud'],
+        ['Secrets', (ex.findings&&ex.findings.secrets)||0, 'key'],
+    ];
+    document.getElementById('statsGrid').innerHTML = cards.map(([k,v,ic]) =>
+        `<div class="stat"><div class="icn">${icon(ic)}</div><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+    // severity bars
+    const maxSev = Math.max(1, ...SEV.map(k=>sev[k]||0));
+    document.getElementById('sevBars').innerHTML = totalV
+        ? SEV.map(k => barRow(k, sev[k]||0, maxSev, sevColor(k))).join('')
+        : emptyLine();
+
+    // band bars
+    const maxB = Math.max(1, ...Object.values(bands));
+    document.getElementById('bandBars').innerHTML = ['critical','high','medium','low'].map(b =>
+        barRow(b, bands[b]||0, maxB, bandColor(b))).join('');
+
+    // tech stack wordcloud
+    renderTechCloud(cache.techstack.technologies || []);
+
+    // top risk assets
+    const top = [...cache.hosts].sort((a,b)=>(b.risk_score||0)-(a.risk_score||0)).slice(0,8);
+    document.getElementById('topRiskBody').innerHTML = top.map(h => rowTopRisk(h)).join('') ||
+        `<tr><td colspan="6" class="empty">No assets yet</td></tr>`;
+}
+
+function setBar(barId, valId, pct, label) {
+    document.getElementById(barId).style.width = Math.min(pct,100) + '%';
+    document.getElementById(valId).textContent = label;
+}
+function barRow(name, val, max, color) {
+    const pct = Math.round((val/max)*100);
+    return `<div class="bar-row"><div class="name">${name}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div><div class="val">${val}</div></div>`;
+}
+function emptyLine(){ return '<div style="color:var(--text-faint);font-size:13px;padding:10px 0">No findings recorded for this scan.</div>'; }
+
+function findingsCount(host) {
+    return cache.vulns.filter(v => v.host === host || (v.url||'').includes(host)).length;
+}
+function rowTopRisk(h) {
+    const fc = findingsCount(h.host);
+    return `<tr class="clickable" onclick="openHost('${attr(h.host)}')">
+        <td><span class="host-link">${esc(h.host)}</span></td>
+        <td style="color:var(--text-dim)">${esc(h.ip||'—')}</td>
+        <td>${statusBadge(h.http_status)}</td>
+        <td>${wafBadge(h.waf_vendor)}</td>
+        <td>${fc ? `<span class="badge b-high">${fc}</span>` : '<span class="pill">0</span>'}</td>
+        <td>${riskChip(h)}</td></tr>`;
+}
+function statusBadge(st){
+    if(!st) return '<span class="pill">—</span>';
+    const cls = st<300?'b-ok':st<400?'b-low':st<500?'b-med':'b-high';
+    return `<span class="badge ${cls}">${st}</span>`;
+}
+function wafBadge(w){
+    if(!w || w==='none') return '<span class="pill">none</span>';
+    return `<span class="badge b-ok">${esc(w)}</span>`;
+}
+function riskChip(h){
+    const b = h.risk_band||'low';
+    return `<span class="risk-chip"><span class="risk-dot" style="background:${bandColor(b)}"></span><span class="score-mini" style="color:${bandColor(b)}">${h.risk_score||0}</span></span>`;
+}
+
+/* ---- Assets ---- */
+function renderAssets() {
+    const q = (document.getElementById('assetSearch').value||'').toLowerCase();
+    let rows = cache.hosts.filter(h => {
+        if (assetFilter==='http' && !h.http_status) return false;
+        if (assetFilter==='waf' && (!h.waf_vendor || h.waf_vendor==='none')) return false;
+        if (assetFilter==='api' && !h.is_api) return false;
+        if (assetFilter==='cdn' && !h.cdn) return false;
+        if (assetFilter==='dangling' && !h.ssl_dangling) return false;
+        if (q && !((h.host||'').toLowerCase().includes(q) || (h.ip||'').toLowerCase().includes(q))) return false;
+        return true;
+    }).sort((a,b)=>(b.risk_score||0)-(a.risk_score||0));
+
+    document.getElementById('assetsBody').innerHTML = rows.map(h => {
+        const fc = findingsCount(h.host);
+        const allP = h.ports_open || [];
+        const ports = allP.slice(0,4).join(', ') + (allP.length>4?' +'+(allP.length-4):'');
+        return `<tr class="clickable" onclick="openHost('${attr(h.host)}')">
+            <td><span class="host-link">${esc(h.host)}${h.is_api?' <span class="pill" style="color:var(--accent)">API</span>':''}<span class="chev">›</span></span></td>
+            <td style="color:var(--text-dim)">${esc(h.ip||'—')}</td>
+            <td>${statusBadge(h.http_status)}</td>
+            <td style="color:var(--text-dim)">${esc(h.server_banner||'—')}</td>
+            <td>${wafBadge(h.waf_vendor)}</td>
+            <td style="color:var(--text-dim)">${ports||'—'}</td>
+            <td>${fc?`<span class="badge b-high">${fc}</span>`:'<span class="pill">0</span>'}</td>
+            <td>${riskChip(h)}</td></tr>`;
+    }).join('') || `<tr><td colspan="8" class="empty">No matching assets</td></tr>`;
+}
+
+/* ---- Vulns ---- */
+function renderVulns() {
+    const q = (document.getElementById('vulnSearch').value||'').toLowerCase();
+    const rows = cache.vulns.filter(v => !q ||
+        (v.template||'').toLowerCase().includes(q) || (v.host||'').toLowerCase().includes(q) ||
+        (v.cve_id||'').toString().toLowerCase().includes(q));
+    document.getElementById('vulnsBody').innerHTML = rows.map(v => `
+        <tr class="clickable" onclick="openHost('${attr(v.host)}')">
+            <td><span class="badge ${sevClass(v.severity)}">${esc(v.severity)}</span></td>
+            <td><b>${esc(v.template)}</b>${v.cve_id?` <span class="pill">${esc(v.cve_id)}</span>`:''}</td>
+            <td><span class="host-link">${esc(v.host||'—')}</span></td>
+            <td style="color:var(--text-dim)">${esc(v.source||'')}</td>
+            <td class="leaf-url">${esc((v.url||'').slice(0,70))}</td>
+        </tr>`).join('') || `<tr><td colspan="5"><div class="empty"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><br>No vulnerabilities detected in this scan.</div></td></tr>`;
+}
+
+/* ---- Ports + Service Fingerprinting ---- */
+function scoreColor(v) {
+    if (v >= 80) return 'var(--crit)';
+    if (v >= 50) return 'var(--high)';
+    if (v >= 25) return 'var(--med)';
+    if (v >= 10) return 'var(--low)';
+    return 'var(--info)';
+}
+function portRiskClass(r) {
+    return r==='critical'?'port-risk-crit':r==='high'?'port-risk-high':r==='medium'?'port-risk-med':'port-risk-low';
+}
+function renderPorts() {
+    const svc = cache.services || {services:[], summary:{}};
+    const sum = svc.summary || {};
+    const rows = svc.services || [];
+
+    // Stats
+    const stats = [
+        ['Open Ports', sum.total_ports||0, 'port'],
+        ['Hosts Scanned', sum.unique_hosts||0, 'globe'],
+        ['Sensitive Exposed', sum.sensitive_ports||0, 'shield'],
+        ['Unique Services', sum.unique_services||0, 'api'],
+    ];
+    document.getElementById('portStats').innerHTML = stats.map(([k,v,ic])=>
+        `<div class="stat"><div class="icn">${icon(ic)}</div><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+    // Breakdown: top services + risk distribution
+    const topSvc = (sum.top_services || []);
+    const maxTS = Math.max(1, ...(topSvc.map(s=>s.count)));
+    const riskCounts = {critical:0, high:0, medium:0, low:0};
+    rows.forEach(r => { riskCounts[r.risk] = (riskCounts[r.risk]||0)+1; });
+    const maxR = Math.max(1, ...Object.values(riskCounts));
+    document.getElementById('portBreakdown').innerHTML = `
+        <div class="card"><h3><span class="ico">${icon('api')}</span> Top Services</h3>${
+            topSvc.length ? topSvc.map(s=>barRow(s.name, s.count, maxTS, '#4f8cff')).join('') : emptyLine()}</div>
+        <div class="card"><h3><span class="ico">${icon('shield')}</span> Port Risk Distribution</h3>${
+            ['critical','high','medium','low'].map(k=>barRow(k, riskCounts[k]||0, maxR, bandColor(k))).join('')}</div>`;
+
+    // Table
+    renderPortsTable();
+}
+function renderPortsTable() {
+    const q = (document.getElementById('portSearch').value||'').toLowerCase();
+    const rows = (cache.services.services || []).filter(r => {
+        if (portRiskFilter !== 'all' && r.risk !== portRiskFilter) return false;
+        if (q) {
+            const hay = (r.host+' '+r.port+' '+r.service+' '+(r.product||'')+' '+(r.version||'')).toLowerCase();
+            if (!hay.includes(q)) return false;
         }
+        return true;
+    });
+    document.getElementById('portsBody').innerHTML = rows.map(r => `
+        <tr class="clickable" onclick="openHost('${attr(r.host)}')">
+            <td><b>${r.port}</b></td>
+            <td><span class="badge ${r.risk==='critical'?'b-crit':r.risk==='high'?'b-high':r.risk==='medium'?'b-med':'b-low'}">${esc(r.service||'unknown')}</span></td>
+            <td class="fingerprint">${esc(r.fingerprint||'—')}</td>
+            <td><span class="host-link">${esc(r.host)}</span></td>
+            <td style="color:var(--text-dim)">${esc(r.ip||'—')}</td>
+            <td>${wafBadge(r.waf)}</td>
+            <td><span class="${portRiskClass(r.risk)}">${r.risk}</span></td>
+        </tr>`).join('') || `<tr><td colspan="7" class="empty">No open ports recorded. Run the full port scan module to populate this.</td></tr>`;
+}
 
-        function severityColor(sev) {
-            return {critical:'#ff0055', high:'#ff6b6b', medium:'#ff9500', low:'#ffd700', info:'#00d4ff'}[sev] || '#888';
+/* ---- Cloud Exposure ---- */
+function renderCloud() {
+    const c = cache.cloud || {};
+    const findings = c.findings || [];
+    const bySev = c.by_severity || {};
+    const cats = c.categories || [];
+    const total = c.total || 0;
+
+    // Detect dominant provider from findings
+    const allText = findings.map(f=>(f.category_label||'')+ ' '+(f.cloud_category||'')+' '+(f.host||'')+' '+(f.evidence||'')+' '+(f.detection_tool||'')).join(' ');
+    const awsN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='aws').length;
+    const gcpN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='gcp').length;
+    const azN = findings.filter(f=>detectProvider((f.category_label||'')+' '+(f.cloud_category||'')+' '+(f.evidence||''))==='azure').length;
+    const otherN = total - awsN - gcpN - azN;
+
+    // Stats with provider icons
+    const topScore = findings.length ? Math.max(...findings.map(f=>f.weighted_score||0)) : 0;
+    const providerStats = [];
+    if (awsN) providerStats.push(`${providerSVG('aws')}<span style="margin-left:2px">${awsN}</span>`);
+    if (gcpN) providerStats.push(`${providerSVG('gcp')}<span style="margin-left:2px">${gcpN}</span>`);
+    if (azN) providerStats.push(`${providerSVG('azure')}<span style="margin-left:2px">${azN}</span>`);
+
+    // Provider bar
+    const provBar = [];
+    if (awsN) provBar.push(`<span class="provider-badge provider-aws" style="padding:6px 14px;font-size:13px">${providerSVG('aws')} AWS <b>${awsN}</b></span>`);
+    if (gcpN) provBar.push(`<span class="provider-badge provider-gcp" style="padding:6px 14px;font-size:13px">${providerSVG('gcp')} GCP <b>${gcpN}</b></span>`);
+    if (azN) provBar.push(`<span class="provider-badge provider-azure" style="padding:6px 14px;font-size:13px">${providerSVG('azure')} Azure <b>${azN}</b></span>`);
+    if (otherN > 0 && total) provBar.push(`<span class="provider-badge provider-unknown" style="padding:6px 14px;font-size:13px">${icon('cloud')} Other <b>${otherN}</b></span>`);
+    if (!total) provBar.push(`<span class="provider-badge provider-aws" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('aws')} AWS</span>`,
+        `<span class="provider-badge provider-gcp" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('gcp')} GCP</span>`,
+        `<span class="provider-badge provider-azure" style="padding:6px 14px;font-size:13px;opacity:.4">${providerSVG('azure')} Azure</span>`);
+    document.getElementById('cloudProviderBar').innerHTML = provBar.join('');
+
+    document.getElementById('cloudStats').innerHTML = `
+        <div class="stat"><div class="icn" style="background:rgba(127,92,255,.12);color:#7c5cff">${icon('cloud')}</div><div class="v">${total}</div><div class="k">Cloud Findings</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(255,77,109,.14);color:var(--crit)">${icon('shield')}</div><div class="v" style="color:var(--crit)">${bySev.critical||0}</div><div class="k">Critical</div></div>
+        <div class="stat"><div class="icn" style="background:rgba(255,138,61,.14);color:var(--high)">${icon('shield')}</div><div class="v" style="color:var(--high)">${bySev.high||0}</div><div class="k">High</div></div>
+        <div class="stat"><div class="icn">${providerStats.length ? providerStats[0].split('<span')[0] : icon('cloud')}</div>
+            <div class="v" style="font-size:15px;display:flex;gap:10px;align-items:center">${providerStats.length ? providerStats.join(' ') : '<span style="font-size:22px">0.0</span>'}</div>
+            <div class="k">${providerStats.length ? 'Providers' : 'Top Score'}</div></div>`;
+
+    // Breakdown: categories + severity
+    const maxCat = Math.max(1, ...cats.map(c=>c.max_score||0));
+    const maxSev = Math.max(1, ...SEV.map(k=>bySev[k]||0));
+    document.getElementById('cloudBreakdown').innerHTML = `
+        <div class="card"><h3><span class="ico">${icon('cloud')}</span> Categories by Top Score</h3>${
+            cats.length ? cats.map(c => {
+                const pct = Math.round((c.max_score/maxCat)*100);
+                return `<div class="bar-row"><div class="name" style="width:140px;text-transform:none">${esc(c.label||c.name||'—')}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${scoreColor(c.max_score)}"></div></div><div class="val">${c.count} <span style="color:var(--text-faint);font-weight:400">×</span> ${c.max_score.toFixed?c.max_score.toFixed(0):c.max_score}</div></div>`;
+            }).join('') : emptyLine()}</div>
+        <div class="card"><h3><span class="ico">${icon('shield')}</span> Severity Distribution</h3>${
+            total ? SEV.map(k=>barRow(k, bySev[k]||0, maxSev, sevColor(k))).join('') : emptyLine()}</div>`;
+
+    renderCloudTable();
+}
+function renderCloudTable() {
+    const q = (document.getElementById('cloudSearch').value||'').toLowerCase();
+    const findings = (cache.cloud.findings || []).filter(f => {
+        if (cloudSevFilter !== 'all' && f.severity !== cloudSevFilter) return false;
+        if (q) {
+            const hay = ((f.host||'')+' '+(f.category_label||f.template||'')+' '+(f.evidence||'')+' '+(f.cloud_category||'')).toLowerCase();
+            if (!hay.includes(q)) return false;
         }
+        return true;
+    });
+    document.getElementById('cloudBody').innerHTML = findings.map(f => {
+        const sc = f.weighted_score||0;
+        const pct = Math.min(sc, 100);
+        const col = scoreColor(sc);
+        const provText = (f.category_label||'') + ' ' + (f.cloud_category||'') + ' ' + (f.evidence||'');
+        return `<tr class="clickable" onclick="openHost('${attr(f.host)}')">
+            <td><div class="score-bar"><span class="score-val" style="color:${col}">${sc.toFixed?sc.toFixed(1):sc}</span><div class="score-bar-track"><div class="score-bar-fill" style="width:${pct}%;background:${col}"></div></div></div></td>
+            <td><b>${esc(f.category_label||f.template||'—')}</b><br>${providerBadge(provText)}</td>
+            <td><span class="host-link">${esc(f.host||'—')}</span></td>
+            <td><span class="badge ${sevClass(f.severity)}">${esc(f.severity)}</span></td>
+            <td><span class="model-tag">${(f.base_weight||0)}×${(f.exploitability||0)}×${(f.exposure||0)}</span></td>
+            <td style="color:var(--text-dim)">${esc(f.detection_tool||f.tool||'—')}</td>
+            <td style="color:var(--text-faint);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((f.evidence||f.impact||'—').slice(0,160))}</td>
+        </tr>`;
+    }).join('') || `<tr><td colspan="7"><div class="empty"><div style="display:flex;justify-content:center;gap:14px;margin-bottom:12px">${providerSVG('aws')}${providerSVG('gcp')}${providerSVG('azure')}</div>No cloud exposure findings. Run the cloud exposure module (17_cloud_exposure) to detect AWS, GCP &amp; Azure misconfigurations.</div></td></tr>`;
+}
 
-        function riskBandClass(band) {
-            return 'risk-' + (band || 'low');
+/* ---- CVEs ---- */
+function renderCves() {
+    const cves = cache.cves || [];
+    const crit = cves.filter(c => c.severity === 'critical').length;
+    const widest = cves.reduce((b,c)=> (!b || (c.affected_hosts||[]).length > (b.affected_hosts||[]).length) ? c : b, null);
+    const summ = [
+        ['Unique CVEs', cves.length, '#4f8cff'],
+        ['Critical CVEs', crit, '#ff4d6d'],
+        ['Most Widespread', widest ? esc(widest.cve_id) + ' · ' + (widest.affected_hosts||[]).length + ' hosts' : '—', '#ff8a3d'],
+    ];
+    document.getElementById('cveSummary').innerHTML = summ.map(([k,v,c])=>
+        `<div class="card"><h3>${k}</h3><div style="font-size:${typeof v==='number'?'34px':'18px'};font-weight:800;color:${c}">${v}</div></div>`).join('');
+    document.getElementById('cvesBody').innerHTML = cves.map(c => {
+        const hosts = (c.affected_hosts||[]);
+        return `<tr>
+            <td><a href="https://nvd.nist.gov/vuln/detail/${attr(c.cve_id)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700">${esc(c.cve_id)}</a></td>
+            <td><span class="badge ${sevClass(c.severity)}">${esc(c.severity)}</span></td>
+            <td>${hosts.length} <span style="color:var(--text-faint)">${hosts.slice(0,3).map(h=>esc(h)).join(', ')}${hosts.length>3?'…':''}</span></td>
+            <td style="color:var(--text-dim)">${esc(c.template||'—')}</td>
+            <td style="color:var(--text-faint)">${(c.cwe_ids||[]).map(esc).join(', ')||'—'}</td></tr>`;
+    }).join('') || `<tr><td colspan="5" class="empty">No CVEs found in scan results.</td></tr>`;
+}
+
+/* ---- API Security ---- */
+function renderApiSec() {
+    const s = cache.apisec.summary || {};
+    const findings = cache.apisec.findings || [];
+    const stats = [
+        ['API Findings', s.total||0, 'api'],
+        ['Autoswagger', s.autoswagger||0, 'shield'],
+        ['RESTler', s.restler||0, 'port'],
+        ['Unique Endpoints', s.unique_endpoints||0, 'web'],
+    ];
+    document.getElementById('apisecStats').innerHTML = stats.map(([k,v,ic])=>
+        `<div class="stat"><div class="icn">${icon(ic)}</div><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+    // breakdown by severity + category
+    const bySev = s.by_severity || {};
+    const byCat = s.by_category || {};
+    const maxS = Math.max(1, ...Object.values(bySev));
+    const maxC = Math.max(1, ...Object.values(byCat));
+    const catEntries = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+    document.getElementById('apisecBreakdown').innerHTML = `
+        <div class="card"><h3>By Severity</h3>${
+            SEV.map(k=>barRow(k, bySev[k]||0, maxS, sevColor(k))).join('')}</div>
+        <div class="card"><h3>By Category</h3>${
+            catEntries.length ? catEntries.map(([k,v])=>barRow(k.replace(/_/g,' '), v, maxC, '#7c5cff')).join('') : emptyLine()}</div>`;
+
+    renderApiSecTable();
+}
+function renderApiSecTable() {
+    const q = (document.getElementById('apisecSearch').value||'').toLowerCase();
+    const rows = (cache.apisec.findings||[]).filter(f => {
+        const tools = f.tools || [f.tool];
+        if (apisecTool !== 'all' && !tools.includes(apisecTool)) return false;
+        if (q) {
+            const hay = ((f.endpoint||'') + ' ' + (f.path||'') + ' ' + (f.issue_class||'') + ' ' + (f.category||'')).toLowerCase();
+            if (!hay.includes(q)) return false;
         }
+        return true;
+    });
+    document.getElementById('apisecBody').innerHTML = rows.map(f => {
+        const tools = f.tools || [f.tool];
+        const ep = f.endpoint || ((f.method||'') + ' ' + (f.path||''));
+        return `<tr>
+            <td class="leaf-url">${esc(ep)}</td>
+            <td>${esc((f.issue_class||'—').replace(/_/g,' '))}</td>
+            <td style="color:var(--text-dim)">${esc(f.category||'—')}</td>
+            <td><span class="badge ${sevClass(f.severity)}">${esc(f.severity||'info')}</span></td>
+            <td>${tools.filter(Boolean).map(t=>`<span class="pill" style="color:${t==='autoswagger'?'var(--accent)':'var(--accent-2)'}">${esc(t)}</span>`).join(' ')}</td>
+            <td style="color:var(--text-faint);font-size:12px">${esc((f.evidence||'—').slice(0,160))}</td></tr>`;
+    }).join('') || `<tr><td colspan="6" class="empty">No API security findings${apisecTool!=='all'?' for '+apisecTool:''}. Run the API security module (16_api_security) to populate this.</td></tr>`;
+}
 
-        function gradeClass(grade) {
-            return 'grade-' + (grade || 'C');
+/* ---- Directories ---- */
+function renderDirs() {
+    const all = cache.dirs || [];
+    const counts = {200:0,403:0,500:0};
+    all.forEach(d => { counts[d.status] = (counts[d.status]||0)+1; });
+    document.querySelectorAll('.chip[data-dir]').forEach(c => {
+        const k = c.dataset.dir;
+        const base = c.textContent.replace(/\s*\(\d+\)$/,'');
+        c.textContent = base + (k!=='all' && counts[k] ? ' ('+counts[k]+')' : '');
+    });
+    const q = (document.getElementById('dirSearch').value||'').toLowerCase();
+    const rows = all.filter(d => (dirFilter==='all' || String(d.status)===dirFilter) &&
+        (!q || (d.url||'').toLowerCase().includes(q)));
+    const dirBadge = st => st===200 ? `<span class="badge b-ok">200 OK</span>` :
+        st===403 ? `<span class="badge b-med">403 Forbidden</span>` :
+        st===500 ? `<span class="badge b-crit">500 Error</span>` : `<span class="badge b-info">${st}</span>`;
+    document.getElementById('dirsBody').innerHTML = rows.map(d => `
+        <tr><td><a href="${attr(d.url)}" target="_blank" rel="noopener" class="leaf-url">${esc(d.url)}</a></td>
+        <td>${dirBadge(d.status)}</td></tr>`).join('') ||
+        `<tr><td colspan="2" class="empty">No directory findings recorded for this scan.</td></tr>`;
+}
+
+/* ---- Modules / pipeline ---- */
+function renderModules() {
+    const mods = cache.modules || {};
+    const entries = Object.entries(mods);
+    document.getElementById('modulesGrid').innerHTML = entries.map(([key, m]) => {
+        const done = m.completed;
+        return `<div class="stat">
+            <div class="icn" style="background:${done?'rgba(52,211,153,.14)':'rgba(139,152,189,.12)'};color:${done?'var(--ok)':'var(--text-faint)'}">
+                ${done?icon('check'):'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5"/></svg>'}
+            </div>
+            <div class="v" style="font-size:16px">${esc(m.name||key)}</div>
+            <div class="k">${done?'<span class="badge b-ok">Completed</span>':'<span class="pill">Pending</span>'} <span class="pill">${m.data_count||0} items</span></div>
+        </div>`;
+    }).join('') || `<div class="empty" style="grid-column:1/-1">No module data.</div>`;
+}
+
+/* ---- Changes ---- */
+async function loadChanges() {
+    const c = await getJSON('/api/compare');
+    const sum = (c && c.summary) || {};
+    const items = [
+        ['New Assets', sum.new_hosts||0, '#ff8a3d'],
+        ['New Ports', sum.new_ports||0, '#ffc43d'],
+        ['New Findings', sum.new_vulnerabilities||0, '#ff4d6d'],
+    ];
+    document.getElementById('changesSummary').innerHTML = items.map(([k,v,col])=>
+        `<div class="card"><div class="big-num" style="color:${col}">${v}<small>${k}</small></div></div>`).join('');
+    if (!c || !c.has_baseline) {
+        document.getElementById('changesDetail').innerHTML = '<div class="empty">No previous scan to compare against — this is the baseline.</div>';
+        return;
+    }
+    const vfmt = v => (v.template || v.source || 'Unknown') + ' on ' + (v.host || 'Unknown') + ' [' + (v.severity||'info').toUpperCase() + ']';
+    const sections = [
+        ['New Hosts', (c.hosts&&c.hosts.added)||[], 'add', h => `<span onclick="openHost('${attr(h)}')" style="cursor:pointer">${esc(h)}</span>`],
+        ['Removed Hosts', (c.hosts&&c.hosts.removed)||[], 'del', h => esc(h)],
+        ['New Ports', (c.ports&&c.ports.added)||[], 'add', p => esc(p)],
+        ['Removed Ports', (c.ports&&c.ports.removed)||[], 'del', p => esc(p)],
+        ['New Vulnerabilities', (c.vulnerabilities&&c.vulnerabilities.added)||[], 'add', vfmt],
+        ['Resolved Vulnerabilities', (c.vulnerabilities&&c.vulnerabilities.removed)||[], 'del', vfmt],
+    ];
+    let html = '';
+    sections.forEach(([title, items, type, fmt]) => {
+        if (!items.length) return;
+        const col = type==='add' ? 'var(--high)' : 'var(--ok)';
+        const sign = type==='add' ? '+' : '−';
+        html += `<div style="margin-bottom:18px"><div style="font-weight:700;margin-bottom:8px;color:${col}">${title} (${items.length})</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">` +
+            items.slice(0,60).map(it => `<span class="badge ${type==='add'?'b-high':'b-ok'}">${sign} ${fmt(it)}</span>`).join('') +
+            (items.length>60?`<span class="pill">…and ${items.length-60} more</span>`:'') + '</div></div>';
+    });
+    document.getElementById('changesDetail').innerHTML = html || '<div class="empty" style="color:var(--ok)">No changes detected between scans.</div>';
+}
+
+/* =====================================================================
+   HOST DRILL-DOWN TREE
+   ===================================================================== */
+async function openHost(host) {
+    if (!host || host === 'Unknown') return;
+    const overlay = document.getElementById('drawerOverlay'), drawer = document.getElementById('drawer');
+    overlay.classList.add('open'); drawer.classList.add('open');
+    document.getElementById('drawerHead').innerHTML = `<div class="row"><div class="drawer-title">${esc(host)}</div><button class="close-x" onclick="closeDrawer()">×</button></div>`;
+    document.getElementById('drawerBody').innerHTML = '<div class="loading"><div class="spinner"></div>Building exposure report…</div>';
+
+    const d = await getJSON('/api/host?host=' + encodeURIComponent(host));
+    if (!d || !d.found) {
+        document.getElementById('drawerBody').innerHTML = '<div class="empty">No detailed data for this asset.</div>';
+        return;
+    }
+    renderDrawer(d);
+}
+function closeDrawer() {
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.getElementById('drawer').classList.remove('open');
+}
+document.getElementById('drawerOverlay').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+function renderDrawer(d) {
+    const sc = d.severity_counts || {};
+    const meta = [
+        d.ip ? `IP <b>${esc(d.ip)}</b>` : '',
+        d.http_status ? `HTTP <b>${d.http_status}</b>` : '',
+        `WAF <b>${esc(d.waf_vendor && d.waf_vendor!=='none' ? d.waf_vendor : 'none')}</b>`,
+        d.server_banner ? `Server <b>${esc(d.server_banner)}</b>` : '',
+        d.cdn ? 'CDN' : '',
+        d.is_api ? 'API' : '',
+    ].filter(Boolean).join(' · ');
+    const rb = d.risk_band||'low';
+    document.getElementById('drawerHead').innerHTML = `
+        <div class="row">
+            <div style="flex:1;min-width:0">
+                <div class="drawer-title">${d.url ? `<a href="${attr(d.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(d.host)}</a>` : esc(d.host)}</div>
+                <div class="drawer-meta">${meta}</div>
+            </div>
+            <div style="text-align:center;margin:0 6px">
+                <div class="score-mini" style="font-size:26px;color:${bandColor(rb)}">${d.risk_score||0}</div>
+                <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px">${rb} risk</div>
+            </div>
+            <button class="close-x" onclick="closeDrawer()">×</button>
+        </div>
+        <div class="drawer-sev">
+            ${['critical','high','medium','low','info'].map(k => (sc[k]?`<span class="badge ${sevClass(k)}">${sc[k]} ${k}</span>`:'')).join('')}
+            <span class="badge b-muted">${d.total_findings||0} total</span>
+        </div>`;
+
+    const cats = d.categories || [];
+    if (!cats.length) {
+        document.getElementById('drawerBody').innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><br>No exposures found for this asset. Clean surface.</div>`;
+        return;
+    }
+    document.getElementById('drawerBody').innerHTML = cats.map((cat, i) => treeNode(cat, i===0)).join('');
+}
+
+function treeNode(cat, open) {
+    const children = cat.findings.map(f => leaf(f)).join('');
+    return `<div class="tree-node ${open?'open':''}">
+        <div class="tree-head" onclick="this.parentElement.classList.toggle('open')">
+            <span class="tree-caret"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            <span class="sev-stripe" style="background:${sevColor(cat.max_severity)};height:20px"></span>
+            <span class="tree-cat-name">${esc(cat.name)}</span>
+            <span class="tree-cat-count"><span class="badge ${sevClass(cat.max_severity)}">${cat.count}</span></span>
+        </div>
+        <div class="tree-children">${children}</div>
+    </div>`;
+}
+function leaf(f) {
+    const bits = [];
+    if (f.url) bits.push(`<div><span class="lbl">Location</span><span class="leaf-url">${esc(f.url)}</span></div>`);
+    if (f.impact) bits.push(`<div><span class="lbl">Impact</span>${esc(f.impact)}</div>`);
+    if (f.remediation) bits.push(`<div><span class="lbl">Fix</span>${esc(f.remediation)}</div>`);
+    if (f.cve_id) bits.push(`<div><span class="lbl">CVE</span><a href="https://nvd.nist.gov/vuln/detail/${attr(f.cve_id)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(f.cve_id)}</a></div>`);
+    return `<div class="leaf">
+        <div class="leaf-top">
+            <span class="sev-stripe" style="background:${sevColor(f.severity)};height:16px"></span>
+            <span class="leaf-title">${esc(f.title)}</span>
+            <span class="badge ${sevClass(f.severity)}">${esc(f.severity)}</span>
+        </div>
+        ${bits.length?`<div class="leaf-detail">${bits.join('')}</div>`:''}
+    </div>`;
+}
+
+/* ---- tiny inline icons ---- */
+function icon(name) {
+    const p = {
+        globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+        check:'<path d="M20 6 9 17l-5-5"/>',
+        web:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
+        shield:'<path d="M12 2 4 6v6c0 5 3 8 8 9 5-1 8-4 8-9V6z"/>',
+        port:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h.01M12 8h.01M8 12h8"/>',
+        api:'<path d="M4 7h16M4 12h16M4 17h10"/>',
+        cloud:'<path d="M17 18a4 4 0 0 0 0-8 6 6 0 0 0-11.6 1.5A3.5 3.5 0 0 0 6 18z"/>',
+        key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+    }[name] || '';
+    return `<svg viewBox="0 0 24 24">${p}</svg>`;
+}
+
+/* ---- Cloud provider detection + icons ---- */
+const PROVIDER_AWS_KEYS = ['aws','amazon','s3','cloudfront','elb','ec2','lambda','rds','dynamodb','sqs','sns','ecs','eks','fargate','route53','elasticache'];
+const PROVIDER_GCP_KEYS = ['gcp','google cloud','gke','cloud run','cloud function','bigquery','gcs','google-storage','firebase','app engine'];
+const PROVIDER_AZURE_KEYS = ['azure','microsoft azure','azure-blob','blob-container','azure cdn','azure functions','cosmos'];
+
+function detectProvider(text) {
+    const t = (text||'').toLowerCase();
+    let aws=false, gcp=false, az=false;
+    if (PROVIDER_AWS_KEYS.some(k => t.includes(k))) aws = true;
+    if (PROVIDER_GCP_KEYS.some(k => t.includes(k))) gcp = true;
+    if (PROVIDER_AZURE_KEYS.some(k => t.includes(k))) az = true;
+    const n = +aws + +gcp + +az;
+    if (n > 1) return 'multi';
+    if (aws) return 'aws';
+    if (gcp) return 'gcp';
+    if (az) return 'azure';
+    return 'unknown';
+}
+
+function providerSVG(p) {
+    if (p === 'aws') return `<svg class="provider-icon" viewBox="0 0 24 24" fill="none"><path d="M7.1 13.2c0 .3 0 .5.1.7l.5.6c0 .1.1.1.1.2s0 .1-.1.2l-.6.5c-.1 0-.1.1-.2.1s-.1 0-.2-.1l-.6-.7h-.1c-.4.5-.9.7-1.5.7-.7 0-1.3-.4-1.3-1.2 0-.5.2-.9.6-1.2.4-.3.9-.4 1.6-.4h.5v-.4c0-.3-.1-.6-.2-.7-.2-.2-.4-.2-.7-.2-.3 0-.6 0-.9.1h-.2c-.1 0-.1-.1-.1-.2v-.4c0-.1 0-.2.1-.2.3-.1.8-.2 1.3-.2.6 0 1 .1 1.3.4.3.3.4.7.4 1.3v1.2zm-2 .8c.2 0 .4 0 .7-.2.2-.1.4-.4.5-.6v-.6h-.4c-.4 0-.8.1-1 .2-.2.2-.3.4-.3.6 0 .2 0 .3.1.4.2.1.3.2.4.2z" fill="#F90"/><path d="M10.1 14.3c-.1 0-.2 0-.3-.1-.1 0-.1-.2-.2-.3l-1.4-4.5c0-.1-.1-.2-.1-.3s.1-.1.2-.1h.6c.2 0 .3 0 .3.1.1.1.1.2.2.3l1 4 .9-4c0-.1.1-.2.2-.3.1 0 .2-.1.3-.1h.5c.2 0 .3 0 .3.1.1.1.1.2.2.3l.9 4 1-4c.1-.2.1-.3.2-.3.1-.1.2-.1.3-.1h.6c.1 0 .2 0 .2.1 0 .1 0 .2-.1.3l-1.5 4.5c0 .2-.1.3-.2.3-.1.1-.2.1-.3.1h-.5c-.2 0-.3 0-.3-.1-.1-.1-.1-.2-.2-.4l-.9-3.8-.9 3.8c0 .2-.1.3-.2.4-.1.1-.2.1-.3.1h-.5z" fill="#F90"/><path d="M18.7 14.5c-.4 0-.9-.1-1.3-.2-.4-.1-.6-.3-.6-.5v-.4c0-.1.1-.2.1-.2h.1l.2.1c.2.1.5.2.7.2.3.1.5.1.7.1.4 0 .7-.1.9-.2.2-.2.3-.3.3-.6 0-.2-.1-.3-.2-.5-.2-.1-.4-.3-.8-.4-.6-.2-.9-.4-1.2-.7-.2-.3-.3-.6-.3-1 0-.3.1-.5.2-.8.2-.2.4-.4.7-.5.3-.1.6-.2 1-.2.2 0 .4 0 .6.1.2 0 .4.1.5.1l.3.1c.1.1.1.1.1.2v.4c0 .1 0 .2-.1.2h-.1c-.2-.1-.5-.2-.8-.3h-.6c-.4 0-.6.1-.8.2-.2.1-.2.3-.2.6 0 .2.1.3.2.5.2.1.4.3.8.4.5.2.9.4 1.1.7.2.3.4.6.4 1 0 .3-.1.6-.2.8-.2.2-.4.4-.7.5-.3.2-.7.2-1.1.2z" fill="#F90"/><path d="M20.5 17.4c-2.4 1.8-5.8 2.7-8.8 2.7-4.2 0-7.9-1.5-10.8-4.1-.2-.2 0-.5.3-.3 3.1 1.8 6.9 2.8 10.8 2.8 2.6 0 5.6-.5 8.3-1.6.4-.2.7.3.2.5z" fill="#F90"/><path d="M21.5 16.3c-.3-.4-2.1-.2-2.9-.1-.2 0-.3-.2-.1-.3 1.4-1 3.8-.7 4-.4.3.4-.1 2.8-1.4 3.9-.2.2-.4.1-.3-.1.3-.7.9-2.6.7-3z" fill="#F90"/></svg>`;
+    if (p === 'gcp') return `<svg class="provider-icon" viewBox="0 0 24 24" fill="none"><path d="M15.6 8.4h.8l2.3-2.3.1-1A10 10 0 0 0 2.6 9.4a1 1 0 0 1 .7-.2h4.5s.2-.4.3-.4a5.4 5.4 0 0 1 7.5-.4z" fill="#EA4335"/><path d="M20.5 9.4A10 10 0 0 0 17 5.1l-3.2 3.2a5.4 5.4 0 0 1 2 4.3v.5a2.7 2.7 0 1 1 0 5.4H12l-.5.6v3.2l.5.5a10 10 0 0 0 8.5-13.4z" fill="#4285F4"/><path d="M3.8 22.7a10 10 0 0 0 8.2.1v-4.3H12a2.7 2.7 0 1 1 0-5.4h.5l3.3-3.3v-.6a5.4 5.4 0 0 0-5.4-3.3A5.5 5.5 0 0 0 5.7 9L2.5 5.9a10 10 0 0 0 1.3 16.8z" fill="#34A853"/><path d="M3.8 22.7A10 10 0 0 1 2.5 6l3.2 3.2a5.4 5.4 0 0 0-1.9 4.4A5.5 5.5 0 0 0 9.3 19H12v4.4a9.5 9.5 0 0 1-8.2-.7z" fill="#FBBC05"/></svg>`;
+    if (p === 'azure') return `<svg class="provider-icon" viewBox="0 0 24 24" fill="none"><path d="M9.3 3h5l-5.8 15.5L2 19.6 9.3 3z" fill="#0078D4"/><path d="M14.8 7.3l3.7 10.1-8.8 1.8c-.2 0-.2.2 0 .2h11.2L14.8 7.3z" fill="#0078D4"/><path d="M14.8 7.3l-4.2 5.2 3.1 5.1-5 1.6L14.8 7.3z" fill="#50E6FF" opacity=".5"/></svg>`;
+    if (p === 'multi') return `<svg class="provider-icon" viewBox="0 0 24 24" fill="none"><circle cx="7" cy="10" r="3" fill="#F90"/><circle cx="17" cy="10" r="3" fill="#4285F4"/><circle cx="12" cy="16" r="3" fill="#0078D4"/></svg>`;
+    return icon('cloud');
+}
+
+function providerBadge(text) {
+    const p = detectProvider(text);
+    const labels = {aws:'AWS',gcp:'GCP',azure:'Azure',multi:'Multi-Cloud',unknown:'Cloud'};
+    return `<span class="provider-badge provider-${p}">${providerSVG(p)} ${labels[p]}</span>`;
+}
+
+/* ---- Tech Stack Wordcloud ---- */
+const TECH_CAT_COLORS = {
+    cloud:'#ff9900', cdn:'#34d399', security:'#ff4d6d', analytics:'#ffc43d',
+    'web-server':'#4f8cff', frontend:'#7c5cff', backend:'#ff8a3d', cms:'#e879f9',
+    protocol:'#5ad1e0', hosting:'#8b98bd', os:'#6b7280', database:'#f472b6', other:'#9ca3af',
+};
+function renderTechCloud(techs) {
+    const el = document.getElementById('techCloud');
+    const legend = document.getElementById('techLegend');
+    if (!techs || !techs.length) {
+        el.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:40px 0;text-align:center">No tech detected yet. Run the pipeline to populate.</div>';
+        legend.innerHTML = '';
+        return;
+    }
+    const maxCount = Math.max(...techs.map(t=>t.count));
+    const W = el.clientWidth || 600;
+    const H = 260;
+    const placed = [];
+
+    function overlaps(x,y,w,h) {
+        for (const p of placed) {
+            if (!(x+w < p.x || x > p.x+p.w || y+h < p.y || y > p.y+p.h)) return true;
         }
+        return false;
+    }
 
-        // =====================================================================
-        // DATA LOADING
-        // =====================================================================
+    let html = '';
+    const sorted = [...techs].sort((a,b)=>b.count-a.count).slice(0,40);
+    for (const t of sorted) {
+        const ratio = t.count / maxCount;
+        const size = Math.max(11, Math.round(12 + ratio * 26));
+        const color = TECH_CAT_COLORS[t.category] || '#9ca3af';
+        const opacity = Math.max(0.5, 0.4 + ratio * 0.6);
+        const estW = t.name.length * size * 0.6;
+        const estH = size * 1.4;
+        let px, py, ok = false;
 
-        async function loadTargets() {
-            try {
-                const previousTargetKey = currentTargetKey;
-                const previousScanId = currentTarget;
-                const response = await fetch(API_BASE + '/api/targets');
-                const targets = await response.json();
-
-                const dropdown = document.getElementById('targetDropdown');
-                dropdown.innerHTML = '';
-
-                if (targets.length === 0) {
-                    dropdown.innerHTML = '<option value="">No scans available</option>';
-                    return;
-                }
-
-                targets.forEach(function(target) {
-                    const option = document.createElement('option');
-                    option.value = target.id;
-                    const revisions = target.revision_count ? ' - ' + target.revision_count + ' scans' : '';
-                    option.textContent = target.name + revisions + ' - ' + target.status;
-                    dropdown.appendChild(option);
-                });
-
-                const selected = targets.find(t => t.id === previousTargetKey) || targets[0];
-                currentTargetKey = selected.id;
-                currentTarget = previousTargetKey === selected.id && previousScanId
-                    ? previousScanId
-                    : selected.latest_scan_id || selected.scan_id || selected.id;
-                dropdown.value = currentTargetKey;
-                await loadRevisions(false);
-            } catch (error) {
-                console.error('Error loading targets:', error);
+        const cx = W/2 - estW/2, cy = H/2 - estH/2;
+        for (let spiral = 0; spiral < 300; spiral++) {
+            const angle = spiral * 0.5;
+            const r = spiral * 1.5;
+            px = cx + r * Math.cos(angle);
+            py = cy + r * Math.sin(angle);
+            if (px >= 0 && py >= 0 && px + estW <= W && py + estH <= H && !overlaps(px, py, estW, estH)) {
+                ok = true;
+                break;
             }
         }
-
-        async function loadRevisions(forceLatest) {
-            const dropdown = document.getElementById('revisionDropdown');
-            if (!currentTargetKey) { dropdown.innerHTML = '<option value="">No revisions</option>'; return; }
-
-            try {
-                const response = await fetch(API_BASE + '/api/targets/history?target=' + encodeURIComponent(currentTargetKey));
-                const revisions = await response.json();
-                dropdown.innerHTML = '';
-                if (!revisions || revisions.length === 0) { dropdown.innerHTML = '<option value="">No revisions</option>'; return; }
-
-                const hasCurrent = revisions.some(r => r.id === currentTarget);
-                if (forceLatest || !hasCurrent) currentTarget = revisions[0].id;
-
-                revisions.forEach(function(revision, index) {
-                    const option = document.createElement('option');
-                    option.value = revision.id;
-                    const label = revision.start_time ? new Date(revision.start_time).toLocaleString() : revision.id;
-                    option.textContent = (index === 0 ? 'Latest' : 'Revision') + ' - ' + label + ' - ' + revision.status;
-                    dropdown.appendChild(option);
-                });
-                dropdown.value = currentTarget;
-            } catch (error) {
-                console.error('Error loading revisions:', error);
-            }
-        }
-
-        async function loadStatistics() {
-            try {
-                const response = await fetch(getApiUrl('/api/statistics'));
-                const stats = await response.json();
-
-                document.getElementById('statTotalHosts').textContent = stats.total_hosts || 0;
-                document.getElementById('statResolvedHosts').textContent = stats.resolved_hosts || 0;
-                document.getElementById('statHttpHosts').textContent = stats.http_hosts || 0;
-                document.getElementById('statWafHosts').textContent = stats.waf_hosts || 0;
-                document.getElementById('statVulnerabilities').textContent = stats.total_vulnerabilities || 0;
-                document.getElementById('statNonHttpServices').textContent = stats.non_http_services || 0;
-                document.getElementById('statOpenPorts').textContent = stats.open_ports || 0;
-                document.getElementById('statFingerprintedServices').textContent = stats.services_fingerprinted || 0;
-
-                // Port scan crash banner
-                const portWarn = document.getElementById('portScanWarning');
-                if (stats.port_scan_status === 'crashed') {
-                    portWarn.style.display = 'block';
-                } else {
-                    portWarn.style.display = 'none';
-                }
-            } catch (error) {
-                console.error('Error loading statistics:', error);
-            }
-        }
-
-        async function loadStatus() {
-            try {
-                const response = await fetch(getApiUrl('/api/status'));
-                const status = await response.json();
-
-                const statusDot = document.getElementById('statusDot');
-                statusDot.className = 'status-dot ' + (status.status || 'no_data');
-
-                let statusText = 'Status: ' + (status.status || 'Unknown');
-                if (status.target) statusText += ' | Target: ' + status.target;
-                if (status.duration) statusText += ' | Duration: ' + status.duration + 's';
-                document.getElementById('statusText').textContent = statusText;
-
-                if (status.start_time) {
-                    document.getElementById('scanInfo').textContent = 'Started: ' + new Date(status.start_time).toLocaleString();
-                }
-            } catch (error) {
-                console.error('Error loading status:', error);
-            }
-        }
-
-        async function loadComparison() {
-            try {
-                const response = await fetch(getApiUrl('/api/compare'));
-                const comparison = await response.json();
-                const summary = comparison.summary || {};
-
-                document.getElementById('cmpNewHosts').textContent = summary.new_hosts || 0;
-                document.getElementById('cmpRemovedHosts').textContent = summary.removed_hosts || 0;
-                document.getElementById('cmpNewPorts').textContent = summary.new_ports || 0;
-                document.getElementById('cmpRemovedPorts').textContent = summary.removed_ports || 0;
-                document.getElementById('cmpNewVulns').textContent = summary.new_vulnerabilities || 0;
-                document.getElementById('cmpRemovedVulns').textContent = summary.removed_vulnerabilities || 0;
-            } catch (error) {
-                console.error('Error loading comparison:', error);
-            }
-        }
-
-        // ----- Executive Summary -----
-        async function loadExecutive() {
-            try {
-                const response = await fetch(getApiUrl('/api/executive'));
-                const exec = await response.json();
-                if (!exec || !exec.org_score && exec.org_score !== 0) return;
-
-                // Risk score + grade
-                const scoreEl = document.getElementById('execRiskScore');
-                scoreEl.textContent = exec.org_score;
-                const gradeEl = document.getElementById('execGrade');
-                gradeEl.textContent = 'Grade: ' + exec.grade;
-                const kpiCard = document.getElementById('kpiRiskScore');
-                kpiCard.className = 'exec-kpi ' + gradeClass(exec.grade);
-                scoreEl.className = 'kpi-value ' + gradeClass(exec.grade);
-
-                // Critical findings
-                document.getElementById('execCritical').textContent =
-                    (exec.findings.by_severity.critical || 0) + (exec.findings.secrets || 0);
-
-                // Internet-facing assets
-                document.getElementById('execAssets').textContent = exec.exposure.internet_facing_http || 0;
-
-                // WAF coverage
-                const wafPct = exec.exposure.waf_coverage_pct || 0;
-                const wafEl = document.getElementById('execWafCoverage');
-                wafEl.textContent = wafPct + '%';
-                wafEl.style.color = wafPct >= 80 ? '#00ff88' : wafPct >= 50 ? '#ffd700' : '#ff6b6b';
-                document.getElementById('execWafDetail').textContent =
-                    exec.exposure.waf_covered + ' covered / ' + exec.exposure.waf_uncovered + ' exposed';
-
-                // Delta
-                const delta = exec.delta || {};
-                const deltaEl = document.getElementById('execDelta');
-                const totalNew = (delta.new_hosts || 0) + (delta.new_ports || 0) + (delta.new_vulnerabilities || 0);
-                const totalRemoved = (delta.removed_hosts || 0) + (delta.removed_ports || 0) + (delta.removed_vulnerabilities || 0);
-                if (!exec.has_baseline) {
-                    deltaEl.textContent = 'First Scan';
-                    deltaEl.style.color = '#888';
-                } else if (totalNew > totalRemoved) {
-                    deltaEl.textContent = '+' + (totalNew - totalRemoved);
-                    deltaEl.style.color = '#ff6b6b';
-                } else if (totalRemoved > totalNew) {
-                    deltaEl.textContent = '-' + (totalRemoved - totalNew);
-                    deltaEl.style.color = '#00ff88';
-                } else {
-                    deltaEl.textContent = 'No Change';
-                    deltaEl.style.color = '#888';
-                }
-                document.getElementById('execDeltaDetail').textContent =
-                    '+' + (delta.new_vulnerabilities || 0) + ' findings, +' + (delta.new_hosts || 0) + ' hosts';
-
-                // Severity bar
-                const sev = exec.findings.by_severity || {};
-                const sevTotal = Object.values(sev).reduce((a, b) => a + b, 0) || 1;
-                const barEl = document.getElementById('execSeverityBar');
-                barEl.innerHTML = '';
-                ['critical', 'high', 'medium', 'low', 'info'].forEach(function(s) {
-                    if (sev[s]) {
-                        const seg = document.createElement('div');
-                        seg.className = 'seg-' + s;
-                        seg.style.width = ((sev[s] / sevTotal) * 100) + '%';
-                        seg.title = s + ': ' + sev[s];
-                        barEl.appendChild(seg);
-                    }
-                });
-
-                const legendEl = document.getElementById('execSeverityLegend');
-                legendEl.innerHTML = '';
-                ['critical', 'high', 'medium', 'low', 'info'].forEach(function(s) {
-                    const item = document.createElement('span');
-                    item.className = 'leg-item';
-                    item.innerHTML = '<span class="leg-dot" style="background:' + severityColor(s) + '"></span>' +
-                        s.charAt(0).toUpperCase() + s.slice(1) + ': ' + (sev[s] || 0);
-                    legendEl.appendChild(item);
-                });
-
-                // Secrets + sensitive services
-                if (exec.findings.secrets > 0 || exec.findings.sensitive_services > 0) {
-                    const extraLeg = document.createElement('span');
-                    extraLeg.className = 'leg-item';
-                    extraLeg.innerHTML = '<span class="leg-dot" style="background:#ff0055"></span>Secrets: ' + exec.findings.secrets +
-                        ' | Sensitive Services: ' + exec.findings.sensitive_services;
-                    legendEl.appendChild(extraLeg);
-                }
-
-                // Port scan status warning
-                if (exec.port_scan_status === 'crashed') {
-                    const warn = document.createElement('span');
-                    warn.className = 'leg-item';
-                    warn.innerHTML = '<span class="leg-dot" style="background:#ffa500"></span>' +
-                        '<span style="color:#ffa500;">Port scan crashed - data incomplete</span>';
-                    legendEl.appendChild(warn);
-                }
-
-                // Top priorities
-                const priList = document.getElementById('execPriorities');
-                priList.innerHTML = '';
-                const priorities = exec.top_priorities || [];
-                if (priorities.length === 0) {
-                    priList.innerHTML = '<li style="color:#00ff88; padding:12px;">No critical priorities identified</li>';
-                } else {
-                    priorities.forEach(function(p, i) {
-                        const li = document.createElement('li');
-                        li.className = 'priority-item';
-                        li.style.borderLeftColor = severityColor(p.severity);
-                        li.innerHTML =
-                            '<span style="color:' + severityColor(p.severity) + '; font-weight:bold; min-width:24px;">#' + (i + 1) + '</span>' +
-                            '<div class="pri-text">' +
-                            '<strong>' + (p.template || p.source || 'Unknown') + '</strong>' +
-                            '<div class="pri-host">' + (p.host || '') + '</div>' +
-                            (p.remediation ? '<div style="color:#666; font-size:0.82em; margin-top:4px;">' + p.remediation.substring(0, 120) + '</div>' : '') +
-                            '</div>' +
-                            '<span class="badge" style="background:' + severityColor(p.severity) + '; color:#fff;">' + (p.severity || '').toUpperCase() + '</span>';
-                        priList.appendChild(li);
-                    });
-                }
-
-                // Trend
-                const trendBars = document.getElementById('execTrendBars');
-                trendBars.innerHTML = '';
-                const trend = (exec.trend || []).slice().reverse();
-                if (trend.length > 0) {
-                    const maxScore = Math.max(...trend.map(t => t.org_score), 10);
-                    trend.forEach(function(t) {
-                        const bar = document.createElement('div');
-                        bar.className = 'trend-bar';
-                        const pct = Math.max((t.org_score / maxScore) * 100, 4);
-                        bar.style.height = pct + '%';
-                        const color = t.org_score >= 60 ? '#ff0055' : t.org_score >= 40 ? '#ff9500' : t.org_score >= 20 ? '#ffd700' : '#00ff88';
-                        bar.style.background = color;
-                        const dateLabel = t.start_time ? new Date(t.start_time).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : t.scan_id.slice(-10);
-                        bar.innerHTML = '<span class="trend-score" style="color:' + color + '">' + t.org_score + '</span>' +
-                            '<span class="trend-label">' + dateLabel + '</span>';
-                        bar.title = 'Score: ' + t.org_score + ' (Grade: ' + t.grade + ') - ' + t.vuln_count + ' vulns';
-                        trendBars.appendChild(bar);
-                    });
-                } else {
-                    trendBars.innerHTML = '<div style="color:#888; padding:20px;">No historical data yet</div>';
-                }
-            } catch (error) {
-                console.error('Error loading executive summary:', error);
-            }
-        }
-
-        // ----- Hosts -----
-        function renderHostsTable(hosts) {
-            const tbody = document.getElementById('hostsTableBody');
-            tbody.innerHTML = '';
-
-            if (!hosts || hosts.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">No hosts found</td></tr>';
-                return;
-            }
-
-            hosts.forEach(function(host) {
-                const tr = document.createElement('tr');
-
-                let statusBadgeClass = 'badge-info';
-                let statusText = 'N/A';
-                if (host.http_status == 200) { statusBadgeClass = 'badge-success'; statusText = '200 OK'; }
-                else if (host.http_status) { statusBadgeClass = 'badge-warning'; statusText = host.http_status; }
-                else if (host.resolved) { statusBadgeClass = 'badge-info'; statusText = 'Resolved'; }
-
-                const wafText = host.waf_vendor && host.waf_vendor !== 'none' ? host.waf_vendor : '-';
-                const cdnText = host.cdn ? '<span class="badge badge-warning">CDN</span>' : '-';
-
-                const riskScore = host.risk_score || 0;
-                const riskBand = host.risk_band || 'low';
-
-                tr.innerHTML =
-                    '<td><span class="badge ' + riskBandClass(riskBand) + '">' + riskScore + '</span></td>' +
-                    '<td style="color: #00d4ff; font-weight: bold;">' + host.host + '</td>' +
-                    '<td>' + (host.ip || '-') + '</td>' +
-                    '<td><span class="badge ' + statusBadgeClass + '">' + statusText + '</span></td>' +
-                    '<td>' + (wafText !== '-' ? '<span class="badge badge-warning">' + wafText + '</span>' : '-') + '</td>' +
-                    '<td>' + cdnText + '</td>' +
-                    '<td>' + (host.security_score || 0) + '/6</td>' +
-                    '<td style="font-size: 0.85em; color: #aaa;">' + (host.server_banner || '-') + '</td>';
-
-                tbody.appendChild(tr);
-            });
-        }
-
-        async function loadHosts() {
-            try {
-                const response = await fetch(getApiUrl('/api/hosts/filter/' + currentFilter));
-                const hosts = await response.json();
-                cachedHosts = hosts;
-                sortAndRenderHosts();
-            } catch (error) {
-                console.error('Error loading hosts:', error);
-                document.getElementById('hostsTableBody').innerHTML =
-                    '<tr><td colspan="8" class="error-message">Error loading hosts: ' + error.message + '</td></tr>';
-            }
-        }
-
-        function sortAndRenderHosts() {
-            const sorted = [...cachedHosts].sort(function(a, b) {
-                let va = a[hostSortField] || 0;
-                let vb = b[hostSortField] || 0;
-                if (typeof va === 'string') va = va.toLowerCase();
-                if (typeof vb === 'string') vb = vb.toLowerCase();
-                if (va < vb) return hostSortAsc ? -1 : 1;
-                if (va > vb) return hostSortAsc ? 1 : -1;
-                return 0;
-            });
-            renderHostsTable(sorted);
-        }
-
-        // ----- Vulnerabilities -----
-        async function loadVulnerabilities() {
-            try {
-                const response = await fetch(getApiUrl('/api/vulnerabilities'));
-                const vulns = await response.json();
-
-                const list = document.getElementById('vulnsList');
-                list.innerHTML = '';
-
-                if (!vulns || vulns.length === 0) {
-                    list.innerHTML = '<li style="color:#00ff88;text-align:center;padding:20px;">No vulnerabilities found</li>';
-                    return;
-                }
-
-                vulns.forEach(function(vuln) {
-                    const color = severityColor(vuln.severity);
-                    const li = document.createElement('li');
-                    li.className = 'vuln-item';
-                    li.style.borderLeftColor = color;
-
-                    const title = vuln.template || vuln.source || 'Unknown';
-                    const cveTag = vuln.cve_id ? ' <a href="https://nvd.nist.gov/vuln/detail/' + vuln.cve_id + '" target="_blank" style="color:#ffd700;">[' + vuln.cve_id + ']</a>' : '';
-
-                    li.innerHTML =
-                        '<div class="vuln-header">' +
-                        '<span class="vuln-title">' + title + cveTag + '</span>' +
-                        '<span class="badge" style="background:' + color + '; color: white;">' + (vuln.severity || 'info').toUpperCase() + '</span>' +
-                        '</div>' +
-                        '<div class="vuln-details">' +
-                        '<div><strong>Host:</strong> ' + (vuln.host || 'Unknown') + '</div>' +
-                        '<div><strong>URL:</strong> ' + (vuln.url || 'N/A') + '</div>' +
-                        (vuln.impact ? '<div style="margin-top:8px; padding:8px; background:rgba(0,0,0,0.2); border-radius:3px;"><strong style="color:#ff6b6b;">Impact:</strong><br>' + vuln.impact.substring(0, 200) + '</div>' : '') +
-                        (vuln.remediation ? '<div style="margin-top:8px; padding:8px; background:rgba(0,255,136,0.1); border-radius:3px;"><strong style="color:#00ff88;">Remediation:</strong><br>' + vuln.remediation.substring(0, 150) + '</div>' : '') +
-                        '</div>';
-
-                    list.appendChild(li);
-                });
-            } catch (error) {
-                console.error('Error loading vulnerabilities:', error);
-            }
-        }
-
-        // ----- CVEs -----
-        async function loadCves() {
-            try {
-                const response = await fetch(getApiUrl('/api/cves'));
-                const cves = await response.json();
-
-                document.getElementById('cveTotal').textContent = cves.length;
-                document.getElementById('cveCritical').textContent = cves.filter(c => c.severity === 'critical').length;
-
-                const mostWidespread = cves.reduce((best, c) => (!best || c.affected_hosts.length > best.affected_hosts.length) ? c : best, null);
-                document.getElementById('cveMostWidespread').textContent = mostWidespread ? mostWidespread.cve_id + ' (' + mostWidespread.affected_hosts.length + ' hosts)' : '--';
-
-                const tbody = document.getElementById('cvesTableBody');
-                tbody.innerHTML = '';
-
-                if (cves.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No CVEs found in scan results</td></tr>';
-                    return;
-                }
-
-                cves.forEach(function(cve) {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML =
-                        '<td><a href="https://nvd.nist.gov/vuln/detail/' + cve.cve_id + '" target="_blank" style="color:#ffd700; text-decoration:none;">' + cve.cve_id + '</a></td>' +
-                        '<td><span class="badge" style="background:' + severityColor(cve.severity) + '; color:#fff;">' + cve.severity.toUpperCase() + '</span></td>' +
-                        '<td>' + cve.affected_hosts.length + ' <span style="color:#888; font-size:0.8em;">(' + cve.affected_hosts.slice(0, 3).join(', ') + (cve.affected_hosts.length > 3 ? '...' : '') + ')</span></td>' +
-                        '<td style="color:#aaa;">' + (cve.template || '--') + '</td>' +
-                        '<td style="color:#888; font-size:0.85em;">' + (cve.cwe_ids.length > 0 ? cve.cwe_ids.join(', ') : '--') + '</td>';
-                    tbody.appendChild(tr);
-                });
-            } catch (error) {
-                console.error('Error loading CVEs:', error);
-            }
-        }
-
-        // ----- Ports -----
-        async function loadPorts() {
-            try {
-                const response = await fetch(getApiUrl('/api/ports'));
-                const ports = await response.json();
-
-                const tbody = document.getElementById('portsTableBody');
-                tbody.innerHTML = '';
-
-                if (!ports || ports.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#888;">No open ports found</td></tr>';
-                    return;
-                }
-
-                ports.forEach(function(portData, index) {
-                    const mainTr = document.createElement('tr');
-                    mainTr.style.cursor = 'pointer';
-                    const detailsId = 'port-details-' + index;
-
-                    mainTr.innerHTML =
-                        '<td><strong style="color:#ffd700;font-size:1.2em;">' + portData.port + '</strong></td>' +
-                        '<td>' + portData.host_count + '</td>' +
-                        '<td style="color:#888;font-size:0.9em;">Click to view hosts <span style="font-size:12px;margin-left:5px;">&#x25BC;</span></td>';
-
-                    const detailsTr = document.createElement('tr');
-                    detailsTr.id = detailsId;
-                    detailsTr.style.display = 'none';
-                    detailsTr.style.backgroundColor = 'rgba(0,0,0,0.1)';
-
-                    const hostsHtml = portData.hosts.map(function(host) {
-                        return '<div style="display:inline-block; margin:4px; padding:8px 12px; background:rgba(0,0,0,0.3); border-radius:4px; font-size:0.85em; border:1px solid rgba(255,255,255,0.05);">' +
-                            '<strong style="color:#00d4ff;">' + host.host + '</strong> ' +
-                            '<span style="color:#888;margin-left:5px;">(' + host.ip + ')</span> ' +
-                            '<span style="color:#aaa;margin-left:5px;">[' + (host.service || 'Unknown') + ']</span>' +
-                            '</div>';
-                    }).join('');
-
-                    detailsTr.innerHTML = '<td colspan="3" style="padding:10px;">' + hostsHtml + '</td>';
-
-                    mainTr.addEventListener('click', function() {
-                        const details = document.getElementById(detailsId);
-                        details.style.display = details.style.display === 'none' ? 'table-row' : 'none';
-                    });
-
-                    tbody.appendChild(mainTr);
-                    tbody.appendChild(detailsTr);
-                });
-            } catch (error) {
-                console.error('Error loading ports:', error);
-            }
-        }
-
-        // ----- Changes -----
-        async function loadChanges() {
-            try {
-                const response = await fetch(getApiUrl('/api/compare'));
-                const comparison = await response.json();
-
-                const container = document.getElementById('changesContent');
-                container.innerHTML = '';
-
-                if (!comparison.has_baseline) {
-                    container.innerHTML = '<div style="text-align:center; color:#888; padding:40px;">This is the first scan for this target. Changes will appear after the next scan.</div>';
-                    return;
-                }
-
-                const sections = [
-                    { title: 'New Hosts', items: comparison.hosts?.added || [], type: 'added', format: h => h },
-                    { title: 'Removed Hosts', items: comparison.hosts?.removed || [], type: 'removed', format: h => h },
-                    { title: 'New Ports', items: comparison.ports?.added || [], type: 'added', format: p => p },
-                    { title: 'Removed Ports', items: comparison.ports?.removed || [], type: 'removed', format: p => p },
-                    { title: 'New Vulnerabilities', items: comparison.vulnerabilities?.added || [], type: 'added', format: v => (v.template || v.source || 'Unknown') + ' on ' + (v.host || 'Unknown') + ' [' + (v.severity || 'info').toUpperCase() + ']' },
-                    { title: 'Resolved Vulnerabilities', items: comparison.vulnerabilities?.removed || [], type: 'removed', format: v => (v.template || v.source || 'Unknown') + ' on ' + (v.host || 'Unknown') + ' [' + (v.severity || 'info').toUpperCase() + ']' }
-                ];
-
-                let hasChanges = false;
-                sections.forEach(function(sec) {
-                    if (sec.items.length === 0) return;
-                    hasChanges = true;
-                    const div = document.createElement('div');
-                    div.className = 'change-section';
-                    div.innerHTML = '<h3>' + sec.title + ' (' + sec.items.length + ')</h3>';
-                    const ul = document.createElement('ul');
-                    ul.className = 'change-list';
-                    sec.items.slice(0, 50).forEach(function(item) {
-                        const li = document.createElement('li');
-                        li.className = sec.type === 'added' ? 'change-added' : 'change-removed';
-                        li.textContent = (sec.type === 'added' ? '+ ' : '- ') + sec.format(item);
-                        ul.appendChild(li);
-                    });
-                    if (sec.items.length > 50) {
-                        const li = document.createElement('li');
-                        li.style.color = '#888';
-                        li.textContent = '... and ' + (sec.items.length - 50) + ' more';
-                        ul.appendChild(li);
-                    }
-                    div.appendChild(ul);
-                    container.appendChild(div);
-                });
-
-                if (!hasChanges) {
-                    container.innerHTML = '<div style="text-align:center; color:#00ff88; padding:40px;">No changes detected between scans</div>';
-                }
-            } catch (error) {
-                console.error('Error loading changes:', error);
-            }
-        }
-
-        // ----- Modules -----
-        async function loadModules() {
-            try {
-                const response = await fetch(getApiUrl('/api/modules'));
-                const modules = await response.json();
-
-                const tbody = document.getElementById('modulesTableBody');
-                tbody.innerHTML = '';
-
-                Object.entries(modules).forEach(function([key, module]) {
-                    const tr = document.createElement('tr');
-                    const statusBadge = module.completed
-                        ? '<span class="badge badge-success">Completed</span>'
-                        : '<span class="badge badge-info">Pending</span>';
-                    tr.innerHTML =
-                        '<td style="color: #00d4ff;">' + module.name + '</td>' +
-                        '<td>' + statusBadge + '</td>' +
-                        '<td>' + (module.data_count || 0) + ' items</td>';
-                    tbody.appendChild(tr);
-                });
-            } catch (error) {
-                console.error('Error loading modules:', error);
-            }
-        }
-
-        // ----- Dirsearch -----
-        async function loadDirsearch() {
-            try {
-                const response = await fetch(getApiUrl('/api/dirsearch'));
-                const directories = await response.json();
-
-                const tbody = document.getElementById('dirsearchTableBody');
-                tbody.innerHTML = '';
-
-                if (!directories || directories.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#888;">No hidden directories found</td></tr>';
-                    return;
-                }
-
-                directories.forEach(function(dir) {
-                    let badgeColor = '#00ff88';
-                    let badgeText = dir.status + ' OK';
-                    if (dir.status === 403) { badgeColor = '#ffa500'; badgeText = '403 Forbidden'; }
-                    else if (dir.status === 500) { badgeColor = '#ff4444'; badgeText = '500 Error'; }
-
-                    const tr = document.createElement('tr');
-                    tr.innerHTML =
-                        '<td><a href="' + dir.url + '" target="_blank" style="color:#00d4ff;text-decoration:none;">' + dir.url + '</a></td>' +
-                        '<td><span class="badge" style="background:' + badgeColor + ';color:#000;">' + badgeText + '</span></td>';
-                    tbody.appendChild(tr);
-                });
-            } catch (error) {
-                console.error('Error loading directories:', error);
-            }
-        }
-
-        // =====================================================================
-        // LOAD ALL
-        // =====================================================================
-
-        async function loadAllData() {
-            loadStatus();
-            loadStatistics();
-            loadExecutive();
-            loadHosts();
-            loadVulnerabilities();
-            loadCves();
-            loadPorts();
-            loadModules();
-            loadDirsearch();
-            loadComparison();
-            loadChanges();
-        }
-
-        // =====================================================================
-        // EVENT HANDLERS
-        // =====================================================================
-
-        document.getElementById('targetDropdown').addEventListener('change', function(e) {
-            currentTargetKey = e.target.value;
-            currentTarget = null;
-            loadRevisions(true).then(loadAllData);
-        });
-
-        document.getElementById('revisionDropdown').addEventListener('change', function(e) {
-            currentTarget = e.target.value;
-            loadAllData();
-        });
-
-        // Tab switching
-        document.querySelectorAll('.nav-tab').forEach(function(tab) {
-            tab.addEventListener('click', function() {
-                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                this.classList.add('active');
-                document.getElementById(this.getAttribute('data-tab')).classList.add('active');
-            });
-        });
-
-        // Host table sorting
-        document.querySelectorAll('#hostsTable th[data-sort]').forEach(function(th) {
-            th.addEventListener('click', function() {
-                const field = this.getAttribute('data-sort');
-                if (hostSortField === field) {
-                    hostSortAsc = !hostSortAsc;
-                } else {
-                    hostSortField = field;
-                    hostSortAsc = field === 'host' || field === 'ip';
-                }
-                sortAndRenderHosts();
-            });
-        });
-
-        // Search box
-        document.getElementById('searchBox').addEventListener('input', async function(e) {
-            const query = e.target.value;
-            if (query.length > 0) {
-                try {
-                    const searchBase = getApiUrl('/api/hosts/search');
-                    const separator = searchBase.includes('?') ? '&' : '?';
-                    const response = await fetch(searchBase + separator + 'q=' + encodeURIComponent(query));
-                    cachedHosts = await response.json();
-                    sortAndRenderHosts();
-                } catch (error) {
-                    console.error('Search error:', error);
-                }
-            } else {
-                loadHosts();
-            }
-        });
-
-        // Filter buttons
-        document.querySelectorAll('.filter-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                currentFilter = this.getAttribute('data-filter');
-                loadHosts();
-            });
-        });
-
-        // =====================================================================
-        // INITIALIZATION
-        // =====================================================================
-
-        loadTargets().then(loadAllData);
-        setInterval(function() { loadAllData(); loadTargets(); }, 15000);
-    </script>
-</body>
-</html>
+        if (!ok) continue;
+        placed.push({x:px, y:py, w:estW, h:estH});
+        html += `<span class="tech-word" style="left:${px}px;top:${py}px;font-size:${size}px;color:${color};opacity:${opacity}" title="${esc(t.name)}: ${t.count} detections across ${t.hosts} hosts">${esc(t.name)}</span>`;
+    }
+    el.innerHTML = html;
+
+    const cats = {};
+    techs.forEach(t => { cats[t.category] = (cats[t.category]||0) + t.count; });
+    const catLabels = {cloud:'Cloud',cdn:'CDN',security:'Security',analytics:'Analytics','web-server':'Web Server',frontend:'Frontend',backend:'Backend',cms:'CMS',protocol:'Protocol',hosting:'Hosting',os:'OS',database:'Database',other:'Other'};
+    legend.innerHTML = Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([k,v]) =>
+        `<span class="tech-legend-chip"><span class="tech-legend-dot" style="background:${TECH_CAT_COLORS[k]||'#9ca3af'}"></span>${catLabels[k]||k} (${v})</span>`
+    ).join('');
+}
+
+/* =====================================================================
+   NAV + EVENTS
+   ===================================================================== */
+document.querySelectorAll('.nav-item').forEach(n => n.onclick = () => {
+    document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+    n.classList.add('active');
+    document.getElementById('view-'+n.dataset.view).classList.add('active');
+});
+document.getElementById('seeAllAssets').onclick = () => {
+    document.querySelector('.nav-item[data-view="assets"]').click();
+};
+document.querySelectorAll('.chip[data-filter]').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip[data-filter]').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); assetFilter = c.dataset.filter; renderAssets();
+});
+document.getElementById('assetSearch').oninput = renderAssets;
+document.getElementById('vulnSearch').oninput = renderVulns;
+document.getElementById('apisecSearch').oninput = renderApiSecTable;
+document.getElementById('dirSearch').oninput = renderDirs;
+document.querySelectorAll('.chip[data-tool]').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip[data-tool]').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); apisecTool = c.dataset.tool; renderApiSecTable();
+});
+document.querySelectorAll('.chip[data-dir]').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip[data-dir]').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); dirFilter = c.dataset.dir; renderDirs();
+});
+document.querySelectorAll('.chip[data-cloudsev]').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip[data-cloudsev]').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); cloudSevFilter = c.dataset.cloudsev; renderCloudTable();
+});
+document.querySelectorAll('.chip[data-portrisk]').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip[data-portrisk]').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); portRiskFilter = c.dataset.portrisk; renderPortsTable();
+});
+document.getElementById('cloudSearch').oninput = renderCloudTable;
+document.getElementById('portSearch').oninput = renderPortsTable;
+document.getElementById('refreshBtn').onclick = async () => { await loadTargets(); await reloadAll(); };
+document.getElementById('targetDropdown').onchange = async e => {
+    currentTargetKey = e.target.value; currentTarget = null;
+    await loadRevisions(true); await reloadAll();
+};
+document.getElementById('revisionDropdown').onchange = async e => {
+    currentTarget = e.target.value; await reloadAll();
+};
+
+/* ---- init + auto-refresh ---- */
+(async function init(){
+    await loadTargets();
+    await reloadAll();
+    setInterval(reloadAll, 15000);
+})();
+</script>

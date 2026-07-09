@@ -1,0 +1,59 @@
+id: arise-terraform-state-exposure
+
+info:
+  name: Exposed Terraform State File
+  author: arise
+  severity: high
+  description: >
+    Detects a publicly readable Terraform state file. State files frequently
+    embed plaintext secrets (provider credentials, DB passwords, private keys)
+    and a full inventory of deployed cloud infrastructure.
+  reference:
+    - https://developer.hashicorp.com/terraform/language/state/sensitive-data
+  classification:
+    cvss-metrics: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N
+    cvss-score: 7.5
+    cwe-id: CWE-538
+  metadata:
+    arise-category: terraform_state_exposed
+    arise-weight: 95
+  tags: arise,cloud,exposure,terraform,config
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/terraform.tfstate"
+      - "{{BaseURL}}/.terraform/terraform.tfstate"
+      - "{{BaseURL}}/terraform.tfstate.backup"
+      - "{{BaseURL}}/state/terraform.tfstate"
+      - "{{BaseURL}}/infra/terraform.tfstate"
+
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"terraform_version"'
+          - '"lineage"'
+        condition: and
+
+      - type: word
+        part: header
+        words:
+          - "application/json"
+          - "application/octet-stream"
+          - "text/plain"
+        condition: or
+
+      - type: status
+        status:
+          - 200
+
+    extractors:
+      - type: regex
+        part: body
+        name: terraform_version
+        group: 1
+        regex:
+          - '"terraform_version":\s*"([0-9.]+)"'
