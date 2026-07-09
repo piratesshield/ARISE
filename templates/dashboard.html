@@ -478,7 +478,7 @@
                 <!-- Cloud recon inventory -->
                 <div class="section-label" style="margin-top:22px"><span class="ico"><svg viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/><circle cx="12" cy="14" r="1.5"/></svg></span> <span id="cloudReconLabel">Cloud Recon &amp; Estate Inventory</span></div>
                 <div class="grid cols-2" id="cloudReconTop"></div>
-                <div class="card" id="cloudBucketsCard" style="padding:0;margin-top:14px;display:none">
+                <div class="card" id="cloudBucketsCard" style="padding:0;margin-top:14px">
                     <h3 style="padding:14px 18px 0"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span> Storage Buckets Discovered</h3>
                     <div class="table-wrap">
                         <table>
@@ -1093,26 +1093,26 @@ function renderCloudRecon(recon) {
                 return `<div class="bar-row"><div class="name" style="width:110px;text-transform:none">${esc(name)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:#34d399"></div></div><div class="val">${n}</div></div>`;
             }).join('') : emptyLine()}</div>`;
 
-    // Buckets table
+    // Buckets table — always visible so it never silently vanishes; shows an
+    // empty state that explains how to populate it when Phase 2 hasn't run.
     const buckets = recon.buckets || [];
-    const bcard = document.getElementById('cloudBucketsCard');
-    if (buckets.length) {
-        bcard.style.display = '';
-        document.getElementById('cloudBucketsBody').innerHTML = buckets.map(b => {
-            const acls = b.access==='public'?'access-public':(b.access==='exists'?'access-exists':'access-private');
-            const pcls = ['aws','gcp','azure'].includes(b.provider)?'provider-'+b.provider:'provider-unknown';
-            return `<tr>
-                <td><b>${esc(b.name)}</b></td>
-                <td><span class="provider-badge ${pcls}">${providerSVG(b.provider)} ${PROVIDER_LABELS[b.provider]||b.provider}</span></td>
-                <td><span class="access-badge ${acls}">${esc(b.access)}</span></td>
-                <td style="font-variant-numeric:tabular-nums">${b.files||0}</td>
-                <td style="color:var(--text-dim);font-size:11px">${esc(b.note||'—')}</td>
-                <td>${b.url?`<a href="${attr(b.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px">open ↗</a>`:'—'}</td>
-            </tr>`;
-        }).join('');
-    } else {
-        bcard.style.display = 'none';
-    }
+    const bsum = recon.bucket_summary || {};
+    document.getElementById('cloudBucketsBody').innerHTML = buckets.length ? buckets.map(b => {
+        const acls = b.access==='public'?'access-public':(b.access==='exists'?'access-exists':'access-private');
+        const pcls = ['aws','gcp','azure'].includes(b.provider)?'provider-'+b.provider:'provider-unknown';
+        return `<tr>
+            <td><b>${esc(b.name)}</b></td>
+            <td><span class="provider-badge ${pcls}">${providerSVG(b.provider)} ${PROVIDER_LABELS[b.provider]||b.provider}</span></td>
+            <td><span class="access-badge ${acls}">${esc(b.access)}</span></td>
+            <td style="font-variant-numeric:tabular-nums">${b.files||0}</td>
+            <td style="color:var(--text-dim);font-size:11px">${esc(b.note||'—')}</td>
+            <td>${b.url?`<a href="${attr(b.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px">open ↗</a>`:'—'}</td>
+        </tr>`;
+    }).join('') : `<tr><td colspan="6" class="empty" style="padding:26px 18px">${cloudBucketIcon()}<br>No storage buckets enumerated for this scan. Phase 2 (<code>cloud_enum</code> + <code>s3scanner</code>) runs during a full pipeline pass — older scans predate it.</td></tr>`;
+    // Update the card heading with the public/total count so the state is legible.
+    const bhead = document.querySelector('#cloudBucketsCard h3');
+    if (bhead) bhead.innerHTML = `<span class="ico">${cloudBucketIcon()}</span> Storage Buckets Discovered` +
+        (bsum.total ? ` <span style="margin-left:auto;font-weight:400;font-size:12px;color:${bsum.public?'var(--crit)':'var(--text-faint)'}">${bsum.public||0} public · ${bsum.total} total</span>` : '');
 
     // Origin IPs table
     const origins = recon.origin_ips || [];
